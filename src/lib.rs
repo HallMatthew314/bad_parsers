@@ -1205,7 +1205,8 @@ where
 
 /// Creates a parser that always succeeds with the given value.
 ///
-/// `A: Clone` is required because the parser can run multiple times.
+/// `A` is required to implement [`Clone`] because the parser can run multiple times and must
+/// be able to produce the same value each time.
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, succeed};
@@ -1250,6 +1251,12 @@ where
 ///
 /// This function behaves in a similar way to the `and_then` functions of other types such as
 /// [`Result`] or [`Option`].
+///
+/// Parsers built with this combinator will first try to parse a value with `p`.
+/// If `p` fails, then the whole parser fails.
+/// If `p` succeeds, the parser will pass the parsed value into `f` to generate a new parser.
+/// Then the parser will run that new parser on the rest of the input, succeeding or failing
+/// based on what the new parser does.
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, any_token, token};
@@ -1283,6 +1290,10 @@ where
 }
 
 /// Alters the returned value of a successful parse with the given function.
+///
+/// This parser will first try to parse a value with `p`.
+/// If `p` fails then the parser fails as normal.
+/// If `p` succeeds, the parser will pass the parsed value into `f` and then return that value.
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -1305,8 +1316,16 @@ where
 
 /// Discards the returned value of a successful parse.
 ///
-/// Can be used to simplify return types when the actual parsed value is not relevant.
-/// May also provide performance improvements. Maybe? I dunno I'm just some guy with a laptop.
+/// When `p` successfully parses a value, it is discarded and replaced with a [`()`](unit).
+///
+/// This can be used to simplify return types when the actual parsed value is not relevant.
+///
+/// Additionally, since [`()`](unit) is a zero-sized type, using this combinator may also
+/// provide performance improvements.
+///
+/// Maybe?
+///
+/// I don't know, I'm just some guy with a laptop.
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -1330,7 +1349,10 @@ where
 
 /// Alters the returned value of a successful parse with `A::into`.
 ///
-/// Naturally, there must be an implementation of [`From<A>`] or [`Into<B>`] to use this function.
+/// When `p` successfully parses a value, it is converted from an `A` into a `B`.
+///
+/// Naturally, there must be an implementation of [`From<A>`] or [`Into<B>`] to use this
+/// combinator.
 /// Examples:
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -1353,7 +1375,10 @@ where
 
 /// Replaces the returned value of a successful parse with the given value.
 ///
-/// `B: Clone` is required because the parser can run multiple times.
+/// When `p` successfully parses a value, it is replaced with another arbitrary value.
+///
+/// `B` is required to implement [`Clone`] because the parser can run multiple times and must
+/// be able to produce the same value each time.
 /// ## Examples:
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -1378,6 +1403,11 @@ where
 ///
 /// Strictly speaking, the two parsers are probably going to have different types.
 /// The important part is that they accept the same input type and return the same output type.
+///
+/// This parser will first attempt to parse a value with `p`.
+/// If `p` succeeds, that value is returned.
+/// If `p` fails, the parser will attempt to parse the same input with `q` and return whatever
+/// the result of that is, success or fail.
 ///
 /// When called directly, `p` will be used first and `q` second.
 /// When called as a [method of `Parser`](Parser::or), the receiving parser (the `self`) is
@@ -1410,13 +1440,16 @@ where
     }
 }
 
-/// Inserts the given value when the given parser fails.
+/// Returns the given value when the given parser fails.
 ///
 /// When `p` succeeds, the parser behaves as normal.
 /// When `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
 /// returns `value`.
 ///
-/// `A: Clone` is needed because the parser can run multiple times.
+/// `A` is required to implement [`Clone`] because the parser can run multiple times and will
+/// need to produce the same value on each failed parse.
+///
+/// See also: [`optional`], [`recover_default`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -1441,9 +1474,11 @@ where
 ///
 /// When `p` succeeds, the parser behaves as normal.
 /// When `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
-/// returns `A::default()`.
+/// returns the result of `A::default`.
 ///
-/// Naturally, `A: Default` is needed to generate a default value.
+/// Naturally, `A` must implement [`Default`] to generate a default value.
+///
+/// See also: [`optional`], [`recover`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -1465,9 +1500,12 @@ where
 }
 
 /// Wraps the return value in an `Option`, allows parsing to continue on failure.
-/// When `p` succeeds, the parser returns the value it normally would within a `Some`.
-/// When `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
-/// returns `None`.
+///
+/// If `p` succeeds, the parser returns the value it normally would within a [`Some`].
+/// If `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
+/// returns a [`None`].
+///
+/// See also: [`recover`], [`recover_default`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -1493,8 +1531,13 @@ where
 
 /// Fails the given parser if its return value does NOT pass the given predicate.
 ///
-/// This combinator serves as a way to assert a particular condition of the parsed value that would
-/// be impossible/inconvenient to check directly at the parsing step.
+/// If `p` fails to parse as normal, then the parser fails.
+/// If `p` succeeds, the parsed value is given to the predicate.
+/// The value is then returned as normal if it passes the predicate.
+/// If it fails the predicate, then the parser fails.
+///
+/// This combinator serves as a way to assert a particular condition of the parsed value that
+/// would be impossible/inconvenient to check directly at the parsing step.
 ///
 /// See also: [`reject`], [`token_satisfies`].
 /// ## Examples
@@ -1529,8 +1572,13 @@ where
 
 /// Fails the given parser if its return value DOES pass the given predicate.
 ///
-/// This combinator serves as a way to assert a particular condition of the parsed value that would
-/// be impossible/inconvenient to check directly at the parsing step.
+/// If `p` fails to parse as normal, then the parser fails.
+/// If `p` succeeds, the parsed value is given to the predicate.
+/// The value is then returned as normal if it *fails* the predicate.
+/// If it passes the predicate, then the parser fails.
+///
+/// This combinator serves as a way to assert a particular condition of the parsed value that
+/// would be impossible/inconvenient to check directly at the parsing step.
 ///
 /// See also: [`ensure`], [`token_satisfies`].
 /// ## Examples
@@ -1562,8 +1610,15 @@ where
 
 /// Parses with two parsers in series, returns both values.
 ///
-/// Both parsers must succeed in the order that they are provided. They must also operate on the
-/// same input type, though they are free to have different return types.
+/// This parser will first try to parse a value with `p`.
+/// If `p` succeeds, the parser will try to then parse a value with `q` (from the returned input
+/// from `p`).
+/// If `q` succeeds, then both values are returned.
+/// If either `p` or `q` fail, then the parser fails.
+///
+/// Both parsers must succeed *in the order that they are provided*.
+/// They must also operate on the same input type, though they are free to have different
+/// return types.
 ///
 /// When called directly, `p` will be used first and `q` second.
 /// When called as a [method of `Parser`](Parser::plus), the receiving parser (the `self`) is
@@ -1603,8 +1658,15 @@ where
 
 /// Parses with two parsers in series, returns the first value.
 ///
-/// Both parsers must succeed in the order that they are provided. They must also operate on the
-/// same input type, though they are free to have different return types.
+/// This parser will first try to parse a value with `p`.
+/// If `p` succeeds, the parser will try to then parse a value with `q` (from the returned input
+/// from `p`).
+/// If `q` succeeds, then the value parsed by `q` is returned.
+/// If either `p` or `q` fail, then the parser fails.
+///
+/// Both parsers must succeed *in the order that they are provided*.
+/// They must also operate on the same input type, though they are free to have different
+/// return types.
 ///
 /// When called directly, `p` will be used first and `q` second.
 /// When called as a [method of `Parser`](Parser::left), the receiving parser (the `self`) is
@@ -1640,8 +1702,15 @@ where
 
 /// Parses with two parsers in series, returns second value
 ///
-/// Both parsers must succeed in the order that they are provided. They must also operate on the
-/// same input type, though they are free to have different return types.
+/// This parser will first try to parse a value with `p`.
+/// If `p` succeeds, the parser will try to then parse a value with `q` (from the returned input
+/// from `p`).
+/// If `q` succeeds, then the value parsed by `q` is returned.
+/// If either `p` or `q` fail, then the parser fails.
+///
+/// Both parsers must succeed *in the order that they are provided*.
+/// They must also operate on the same input type, though they are free to have different
+/// return types.
 ///
 /// When called directly, `p` will be used first and `q` second.
 /// When called as a [method of `Parser`](Parser::right), the receiving parser (the `self`) is
