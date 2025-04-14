@@ -11,15 +11,15 @@
 //!
 //! In addition to these qulities, using this library in your own project is guaranteed to
 //! make it worse! For free!
-//! 
+//!
 //! ## Main Features
 //!
 //! * A [Parser trait](Parser) that primarily interfaces with functions and closures that act
-//! like parsers, but could also be used to treat other types as parsers as well.
+//!     like parsers, but could also be used to treat other types as parsers as well.
 //! * A [Tokens trait](Tokens) that allows things to be parsed out of
-//! arbitrary data types.<sup>[citation needed]</sup>
+//!     arbitrary data types.<sup>[citation needed]</sup>
 //! * Slightly-above the bare minimum of error handling: [`ParseResult`]s can provide one (1)
-//! error message when parsing is unsuccessful.
+//!     error message when parsing is unsuccessful.
 //! * [Lazily evaluated parsers](lazy) that allow for recursive definitions.
 //! * A collection of common parser combinator utility functions to build custom parsers with.
 //!
@@ -29,13 +29,13 @@
 //! To this end, a parser can be thought of as a function from some input tokens to some kind of
 //! data the parser is looking for.
 //! To achieve this, a parser will:
-//! 
+//!
 //! * Examine the stream of tokens
 //! * Fail if it cannot find what it is looking for
 //! * If it does find it, return the parsed data *and* the remaining tokens
-//! 
+//!
 //! The importance of returning the remaining tokens cannot be overstated, as this is what allows
-//! multiple simple parsers to be composed and chained to create much more sophisticated parsers.
+//! multiple simple parsers to be composed and chained together to create much more sophisticated parsers.
 //!
 //! ## [`Tokens`] and parser inputs
 //!
@@ -55,7 +55,7 @@
 //!
 //! Currently, [`Tokens`] is only implemented OOTB by [`&str`] and [`&[T]`](slice).
 //! In practice, these should be the only input types you would need to deal with.
-//! 
+//!
 //! These two types having the same interface allows parsers to parse directly from strings, as
 //! well as collections of arbitrary token types.
 //! This means that for applications such as parsing a programming language, the combinator
@@ -117,7 +117,7 @@
 //! If it succeeds, we need to return the digits it found, as well as the rest of the string.
 //!
 //! To get started, let's just try to parse a single digit.
-//! We can do this with the parser-building function [`token_satisfies`], which builds a simple 
+//! We can do this with the parser-building function [`token_satisfies`], which builds a simple
 //! parser out of a predicate function:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
@@ -181,7 +181,7 @@
 //! With that, we're almost there!
 //! Our digits are now actual numbers.
 //! All we have to do now is put them together.
-//! 
+//!
 //! We'll need a more involved [`map`] for this one:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
@@ -350,17 +350,7 @@
 //! ```
 //! Oh.
 
-
-use std::ops::{
-    Add,
-    BitOr,
-    Shl,
-    Shr,
-    Bound,
-    Deref,
-    Mul,
-    RangeBounds,
-};
+use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
 /// Alias for the `Err` type of [`ParseResult`].
 ///
@@ -518,7 +508,7 @@ where
 
 impl<'a> Tokens<char> for &'a str {
     fn take_one(self) -> Option<(&'a str, char)> {
-        self.chars().next().map(|c| (&self[c.len_utf8()..], c.clone()))
+        self.chars().next().map(|c| (&self[c.len_utf8()..], c))
     }
 
     fn no_tokens(&self) -> bool {
@@ -584,7 +574,7 @@ where
 ///
 /// // Parser defined first
 /// let two_tokens = any_token().plus(any_token());
-/// 
+///
 /// // Input defined second, will not live long enough
 /// let nums = [1, 2, 3, 4, 5, 6];
 /// let nums_slice = nums.as_slice();
@@ -616,7 +606,7 @@ where
 /// ```
 /// /* Fixed version of previous example. */
 /// use bad_parsers::{Parser, any_token};
-/// 
+///
 /// // Input defined second, will now live long enough
 /// let nums = [1, 2, 3, 4, 5, 6];
 /// let nums_slice = nums.as_slice();
@@ -1080,6 +1070,11 @@ where
 
 /// Creates a lazily-evaluated parser from another parser-building function.
 ///
+/// This implementation works by moving the builder function `f` into a closure,
+/// which is in turn treated as a parser.
+/// Each time that parser is run, it builds a parser with `f` and passes it the input.
+/// The result from that parser is then returned, success or failure.
+///
 /// Using parsers lazily can sometimes improve performance, but the primary reason this function
 /// exists is to allow for parsers with recursive definitions.
 /// Without lazy evaluation, attempting to recursively define a parser will cause an infinite loop.
@@ -1114,6 +1109,8 @@ where
     move |input| f().parse(input)
 }
 
+// Docs on this function are purposefully unhelpful as error handling
+// is going to be overhauled at some point.
 /// Changes the given parser's error message with the provided function.
 ///
 /// ## Examples
@@ -1141,7 +1138,7 @@ where
     move |input| p.parse(input).map_err(&f)
 }
 
-/// Creates a parser that parses nothing and consumes no input.
+/// Creates a parser that always succeeds and performs no meaningful operations.
 ///
 /// ## Examples
 /// ```
@@ -1161,6 +1158,10 @@ where
 
 /// Creates a parser that succeeds only on empty inputs.
 ///
+/// This parser relies on the [`Tokens::no_tokens`] function to determine if the input is empty.
+/// If the input is empty, it is left alone and the parser returns a [`()`](unit).
+/// If the input is not empty, the parser fails.
+///
 /// This parser is typically used to assert that the entire input has been parsed.
 /// ## Examples
 /// ```
@@ -1176,14 +1177,21 @@ where
     Toks: Tokens<T> + 'a,
     T: Clone,
 {
-    move |input: Toks| if input.no_tokens() {
-        Ok((input, ()))
-    } else {
-        Err("expected eof, found more tokens".to_string())
+    move |input: Toks| {
+        if input.no_tokens() {
+            Ok((input, ()))
+        } else {
+            Err("expected eof, found more tokens".to_string())
+        }
     }
 }
 
 /// Creates a parser that always fails.
+///
+/// This parser will always fail regardless of the input.
+///
+/// Since it never actually returns a value, the return type of this parser can be
+/// coerced into whatever is needed to make it fit in your parser chain.
 ///
 /// It's usually a good idea to set the error of this parser to something meaningful.
 /// ## Examples
@@ -1204,6 +1212,9 @@ where
 }
 
 /// Creates a parser that always succeeds with the given value.
+///
+/// When run, this parser will leave the input alone and instantly return a copy of the
+/// given value.
 ///
 /// `A` is required to implement [`Clone`] because the parser can run multiple times and must
 /// be able to produce the same value each time.
@@ -1226,6 +1237,9 @@ where
 }
 
 /// Creates a parser that always succeeds with a default value.
+///
+/// When run, this parser will leave the input alone and instantly return the result of
+/// `A::default`.
 ///
 /// Naturally, `A` must implement [`Default`] in order to use this function.
 /// ## Examples
@@ -1269,15 +1283,7 @@ where
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse("ab").is_err());
 /// ```
-pub fn and_then<'a,
-    Toks,
-    T,
-    A,
-    P,
-    F,
-    Q,
-    B,
->(p: P, f: F) -> impl Parser<'a, Toks, T, B>
+pub fn and_then<'a, Toks, T, A, P, F, Q, B>(p: P, f: F) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
     T: Clone,
@@ -1436,7 +1442,7 @@ where
 {
     move |input| match p.parse(input) {
         Err(_) => q.parse(input),
-        ok     => ok,
+        ok => ok,
     }
 }
 
@@ -1525,7 +1531,7 @@ where
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) => Ok((rest, Some(x))),
-        Err(_)        => Ok((input, None)),
+        Err(_) => Ok((input, None)),
     }
 }
 
@@ -1566,7 +1572,7 @@ where
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) if f(&x) => Ok((rest, x)),
-        _                      => Err("predicate failed".to_string()),
+        _ => Err("predicate failed".to_string()),
     }
 }
 
@@ -1786,18 +1792,17 @@ where
         let max = match range.end_bound() {
             // edge-case, prevents an underflow and
             // saves a bit of time
-            Bound::Included(0) |
-            Bound::Excluded(0) |
-            Bound::Excluded(1) => { return Ok((input, vec![])); }, 
+            Bound::Included(0) | Bound::Excluded(0) | Bound::Excluded(1) => {
+                return Ok((input, vec![]));
+            }
             // includes edge-case, technically stops vec overflow,
             // which would probably OOM first but who cares
-            Bound::Included(&usize::MAX) |
-            Bound::Unbounded   => usize::MAX,
+            Bound::Included(&usize::MAX) | Bound::Unbounded => usize::MAX,
             Bound::Included(n) => *n,
             Bound::Excluded(n) => n - 1,
         };
         let min = match range.start_bound() {
-            Bound::Unbounded   => 0,
+            Bound::Unbounded => 0,
             Bound::Included(n) => *n,
             Bound::Excluded(n) => n + 1,
         };
@@ -1811,16 +1816,22 @@ where
 
         while values.len() < max {
             match p.parse(input) {
-                Err(_) => { break; },
+                Err(_) => {
+                    break;
+                }
                 Ok((next_input, x)) => {
                     values.push(x);
                     input = next_input;
-                },
+                }
             }
         }
 
         if values.len() < min {
-            Err(format!("needed to parse {} elements, only got {}", min, values.len()))
+            Err(format!(
+                "needed to parse {} elements, only got {}",
+                min,
+                values.len()
+            ))
         } else {
             Ok((input, values))
         }
@@ -2002,7 +2013,7 @@ where
 ///
 /// let p = token('a');
 /// let q = token(',');
-/// 
+///
 /// // This garbage doesn't even compile
 /// // because `p` is moved by the call to `plus`.
 /// let sep_by_p_q: BoxedParser<&str, char, Vec<char>> = p.plus(q.right(p).mult())
@@ -2134,7 +2145,11 @@ where
 /// assert!(p.parse("a>").is_err());
 /// assert!(p.parse("<b>").is_err());
 /// ```
-pub fn between<'a, Toks, T, A, P, Q, B, R, C>(p: P, left: Q, right: R) -> impl Parser<'a, Toks, T, A>
+pub fn between<'a, Toks, T, A, P, Q, B, R, C>(
+    p: P,
+    left: Q,
+    right: R,
+) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
     T: Clone,
@@ -2170,7 +2185,11 @@ where
     Toks: Tokens<T> + 'a,
     T: Clone,
 {
-    move |input: Toks| input.take_one().ok_or("expected a token, got eof".to_string())
+    move |input: Toks| {
+        input
+            .take_one()
+            .ok_or("expected a token, got eof".to_string())
+    }
 }
 
 /// Parses a single token that satisfies the given predicate.
@@ -2249,7 +2268,7 @@ where
 pub fn string<'a>(target: &'a str) -> impl Parser<'a, &'a str, char, &'a str> {
     move |input: &'a str| match input.strip_prefix(target) {
         Some(rest) => Ok((rest, target)),
-        None       => Err(format!("could not parse string literal:{:?}", target)),
+        None => Err(format!("could not parse string literal:{:?}", target)),
     }
 }
 
@@ -2285,7 +2304,7 @@ where
 {
     move |input: &'a str| {
         let mut i: usize = 0;
-        
+
         for c in input.chars() {
             if f(&c) {
                 i += c.len_utf8();
@@ -2373,7 +2392,7 @@ where
         let mut i = 0;
 
         for x in input.iter() {
-            if f(&x) {
+            if f(x) {
                 i += 1;
             } else {
                 break;
@@ -2452,8 +2471,10 @@ mod tests {
     }
 
     // if this test panics, the lazy parser is being evaluated too soon
-    p_test!(test_lazy_non_eval,
-        &str, char,
+    p_test!(
+        test_lazy_non_eval,
+        &str,
+        char,
         token('a').or(lazy(panic_parser)),
         vec![("a", ("", 'a'))],
         vec![],
@@ -2476,8 +2497,10 @@ mod tests {
     }
 
     // if this test hangs, there's a bug with lazy
-    p_test!(test_lazy_recursion,
-        &str, char,
+    p_test!(
+        test_lazy_recursion,
+        &str,
+        char,
         recursive_parser(),
         vec![
             ("b", ("", 'b')),
@@ -2496,25 +2519,28 @@ mod tests {
         assert_eq!(Err("custom message".to_string()), p.parse("b"));
     }
 
-    p_test!(test_identity,
-        &str, (),
+    p_test!(
+        test_identity,
+        &str,
+        (),
         identity(),
-        vec![
-            ("", ("", ())),
-            ("foo", ("foo", ())),
-        ],
+        vec![("", ("", ())), ("foo", ("foo", ())),],
         vec![],
     );
 
-    p_test!(test_eof,
-        &str, (),
+    p_test!(
+        test_eof,
+        &str,
+        (),
         eof(),
         vec![("", ("", ()))],
         vec!["foo", "   "],
     );
 
-    p_test!(test_succeed,
-        &str, u8,
+    p_test!(
+        test_succeed,
+        &str,
+        u8,
         succeed(42),
         vec![
             ("", ("", 42)),
@@ -2524,8 +2550,10 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_succeed_default,
-        &str, u8,
+    p_test!(
+        test_succeed_default,
+        &str,
+        u8,
         succeed_default(),
         vec![
             ("", ("", u8::default())),
@@ -2535,32 +2563,28 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_flunk,
-        &str, (),
+    p_test!(
+        test_flunk,
+        &str,
+        (),
         flunk::<&str, char, ()>(),
         vec![],
         vec!["", "foo", "anything"],
     );
 
-    p_test!(test_and_then,
-        &str, char,
+    p_test!(
+        test_and_then,
+        &str,
+        char,
         any_token().and_then(token),
-        vec![
-            ("aa", ("", 'a')),
-            ("bb", ("", 'b')),
-            ("aab", ("b", 'a')),
-        ],
-        vec![
-            "",
-            "a",
-            "b",
-            "ab",
-            "abb",
-        ],
+        vec![("aa", ("", 'a')), ("bb", ("", 'b')), ("aab", ("b", 'a')),],
+        vec!["", "a", "b", "ab", "abb",],
     );
 
-    p_test!(test_map,
-        &str, u64,
+    p_test!(
+        test_map,
+        &str,
+        u64,
         token('a').map(|c| c.into()),
         vec![
             ("a", ("", 97)),
@@ -2571,18 +2595,19 @@ mod tests {
         vec!["", "b", "ba"],
     );
 
-    p_test!(test_ignore,
-        &str, (),
+    p_test!(
+        test_ignore,
+        &str,
+        (),
         token('a').ignore(),
-        vec![
-            ("a", ("", ())),
-            ("aa", ("a", ())),
-        ],
+        vec![("a", ("", ())), ("aa", ("a", ())),],
         vec!["", "b", "ba"],
     );
 
-    p_test!(test_convert,
-        &str, u64,
+    p_test!(
+        test_convert,
+        &str,
+        u64,
         token('a').convert(),
         vec![
             ("a", ("", 97)),
@@ -2593,8 +2618,10 @@ mod tests {
         vec!["", "b", "ba"],
     );
 
-    p_test!(test_replace,
-        &str, bool,
+    p_test!(
+        test_replace,
+        &str,
+        bool,
         token('a').replace(true),
         vec![
             ("a", ("", true)),
@@ -2605,8 +2632,10 @@ mod tests {
         vec!["", "b", "ba"],
     );
 
-    p_test!(test_or,
-        &str, char,
+    p_test!(
+        test_or,
+        &str,
+        char,
         token('a').or(token('b')),
         vec![
             ("a", ("", 'a')),
@@ -2618,8 +2647,10 @@ mod tests {
         vec!["", "c", "ca", "cb"],
     );
 
-    p_test!(test_recover,
-        &str, char,
+    p_test!(
+        test_recover,
+        &str,
+        char,
         token('a').recover('x'),
         vec![
             ("", ("", 'x')),
@@ -2632,8 +2663,10 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_recover_default,
-        &str, char,
+    p_test!(
+        test_recover_default,
+        &str,
+        char,
         token('a').recover_default(),
         vec![
             ("", ("", char::default())),
@@ -2646,8 +2679,10 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_optional,
-        &str, Option<char>,
+    p_test!(
+        test_optional,
+        &str,
+        Option<char>,
         token('a').optional(),
         vec![
             ("a", ("", Some('a'))),
@@ -2660,34 +2695,28 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_ensure,
-        &str, char,
+    p_test!(
+        test_ensure,
+        &str,
+        char,
         any_token().ensure(|c| *c == 'a'),
-        vec![
-            ("a", ("", 'a')),
-            ("ab", ("b", 'a')),
-            ("abc", ("bc", 'a')),
-        ],
-        vec![
-            "",
-            "b",
-            "ba",
-        ],
+        vec![("a", ("", 'a')), ("ab", ("b", 'a')), ("abc", ("bc", 'a')),],
+        vec!["", "b", "ba",],
     );
 
-    p_test!(test_reject,
-        &str, char,
+    p_test!(
+        test_reject,
+        &str,
+        char,
         any_token().reject(|c| *c == 'a'),
-        vec![
-            ("b", ("", 'b')),
-            ("bc", ("c", 'b')),
-            ("cb", ("b", 'c')),
-        ],
+        vec![("b", ("", 'b')), ("bc", ("c", 'b')), ("cb", ("b", 'c')),],
         vec!["", "a", "apple", "ab"],
     );
 
-    p_test!(test_plus,
-        &str, (char, char),
+    p_test!(
+        test_plus,
+        &str,
+        (char, char),
         token('a').plus(token('b')),
         vec![
             ("ab", ("", ('a', 'b'))),
@@ -2695,17 +2724,13 @@ mod tests {
             ("abb", ("b", ('a', 'b'))),
             ("abc", ("c", ('a', 'b'))),
         ],
-        vec![
-            "",
-            "a",
-            "b",
-            "ba",
-            "acb",
-        ],
+        vec!["", "a", "b", "ba", "acb",],
     );
 
-    p_test!(test_left,
-        &str, char,
+    p_test!(
+        test_left,
+        &str,
+        char,
         token('a').left(token('b')),
         vec![
             ("ab", ("", 'a')),
@@ -2713,17 +2738,13 @@ mod tests {
             ("abb", ("b", 'a')),
             ("abc", ("c", 'a')),
         ],
-        vec![
-            "",
-            "a",
-            "b",
-            "ba",
-            "acb",
-        ],
+        vec!["", "a", "b", "ba", "acb",],
     );
 
-    p_test!(test_right,
-        &str, char,
+    p_test!(
+        test_right,
+        &str,
+        char,
         token('a').right(token('b')),
         vec![
             ("ab", ("", 'b')),
@@ -2731,22 +2752,17 @@ mod tests {
             ("abb", ("b", 'b')),
             ("abc", ("c", 'b')),
         ],
-        vec![
-            "",
-            "a",
-            "b",
-            "ba",
-            "acb",
-        ],
+        vec!["", "a", "b", "ba", "acb",],
     );
 
+    type PR = (Bound<usize>, Bound<usize>);
+
     // in_range(p, ..) <=> mult(p)
-    p_test!(test_in_range_uu,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Unbounded,
-            Bound::Unbounded
-        )),
+    p_test!(
+        test_in_range_uu,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Unbounded, Bound::Unbounded)),
         vec![
             (&[], (&[], vec![])),
             (&[1], (&[], vec![1])),
@@ -2758,47 +2774,39 @@ mod tests {
     );
 
     // in_range(p, 1..) <=> mult1(p) <=> at_least(p, 1)
-    p_test!(test_in_range_iu,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Included(1),
-            Bound::Unbounded
-        )),
+    p_test!(
+        test_in_range_iu,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Included(1), Bound::Unbounded)),
         vec![
             (&[1], (&[], vec![1])),
             (&[1, 2], (&[], vec![1, 2])),
             (&[1, 2, 3], (&[], vec![1, 2, 3])),
             (&[1, 2, 3, 4], (&[], vec![1, 2, 3, 4])),
         ],
-        vec![
-            &[],
-        ],
+        vec![&[],],
     );
 
-    p_test!(test_in_range_eu,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Excluded(1),
-            Bound::Unbounded
-        )),
+    p_test!(
+        test_in_range_eu,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Excluded(1), Bound::Unbounded)),
         vec![
             (&[1, 2], (&[], vec![1, 2])),
             (&[1, 2, 3], (&[], vec![1, 2, 3])),
             (&[1, 2, 3, 4], (&[], vec![1, 2, 3, 4])),
         ],
-        vec![
-            &[],
-            &[1],
-        ],
+        vec![&[], &[1],],
     );
 
     // in_range(p, ..=n) <=> at_most(p, n)
-    p_test!(test_in_range_ui,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Unbounded,
-            Bound::Included(3)
-        )),
+    p_test!(
+        test_in_range_ui,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Unbounded, Bound::Included(3))),
         vec![
             (&[], (&[], vec![])),
             (&[1], (&[], vec![1])),
@@ -2809,46 +2817,38 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_in_range_ii,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Included(1),
-            Bound::Included(3),
-        )),
+    p_test!(
+        test_in_range_ii,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Included(1), Bound::Included(3))),
         vec![
             (&[1], (&[], vec![1])),
             (&[1, 2], (&[], vec![1, 2])),
             (&[1, 2, 3], (&[], vec![1, 2, 3])),
             (&[1, 2, 3, 4], (&[4], vec![1, 2, 3])),
         ],
-        vec![
-            &[],
-        ],
+        vec![&[],],
     );
 
-    p_test!(test_in_range_ei,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Excluded(1),
-            Bound::Included(3)
-        )),
+    p_test!(
+        test_in_range_ei,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Excluded(1), Bound::Included(3))),
         vec![
             (&[1, 2], (&[], vec![1, 2])),
             (&[1, 2, 3], (&[], vec![1, 2, 3])),
             (&[1, 2, 3, 4], (&[4], vec![1, 2, 3])),
         ],
-        vec![
-            &[],
-            &[1],
-        ],
+        vec![&[], &[1],],
     );
 
-    p_test!(test_in_range_ue,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Unbounded,
-            Bound::Excluded(3)
-        )),
+    p_test!(
+        test_in_range_ue,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Unbounded, Bound::Excluded(3))),
         vec![
             (&[], (&[], vec![])),
             (&[1], (&[], vec![1])),
@@ -2859,43 +2859,38 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_in_range_ie,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Included(1),
-            Bound::Excluded(3),
-        )),
+    p_test!(
+        test_in_range_ie,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Included(1), Bound::Excluded(3))),
         vec![
             (&[1], (&[], vec![1])),
             (&[1, 2], (&[], vec![1, 2])),
             (&[1, 2, 3], (&[3], vec![1, 2])),
             (&[1, 2, 3, 4], (&[3, 4], vec![1, 2])),
         ],
-        vec![
-            &[],
-        ],
+        vec![&[],],
     );
 
-    p_test!(test_in_range_ee,
-        &[i32], Vec<i32>,
-        any_token().in_range::<(Bound<usize>, Bound<usize>)>((
-            Bound::Excluded(1),
-            Bound::Excluded(3)
-        )),
+    p_test!(
+        test_in_range_ee,
+        &[i32],
+        Vec<i32>,
+        any_token().in_range::<PR>((Bound::Excluded(1), Bound::Excluded(3))),
         vec![
             (&[1, 2], (&[], vec![1, 2])),
             (&[1, 2, 3], (&[3], vec![1, 2])),
             (&[1, 2, 3, 4], (&[3, 4], vec![1, 2])),
         ],
-        vec![
-            &[],
-            &[1],
-        ],
+        vec![&[], &[1],],
     );
 
     // in_range(p, ..) <=> mult(p)
-    p_test!(test_mult,
-        &[i32], Vec<i32>,
+    p_test!(
+        test_mult,
+        &[i32],
+        Vec<i32>,
         any_token().mult(),
         vec![
             (&[], (&[], vec![])),
@@ -2908,8 +2903,10 @@ mod tests {
     );
 
     // in_range(p, 1..) <=> mult1(p) <=> at_least(p, 1)
-    p_test!(test_mult1,
-        &[i32], Vec<i32>,
+    p_test!(
+        test_mult1,
+        &[i32],
+        Vec<i32>,
         any_token().mult1(),
         vec![
             (&[1], (&[], vec![1])),
@@ -2921,8 +2918,10 @@ mod tests {
     );
 
     // in_range(p, n..=n) <=> exactly(p, n)
-    p_test!(test_exactly,
-        &[i32], Vec<i32>,
+    p_test!(
+        test_exactly,
+        &[i32],
+        Vec<i32>,
         any_token().exactly(2),
         vec![
             (&[1, 2], (&[], vec![1, 2])),
@@ -2933,8 +2932,10 @@ mod tests {
     );
 
     // in_range(p, 1..) <=> mult1(p) <=> at_least(p, 1)
-    p_test!(test_at_least,
-        &[i32], Vec<i32>,
+    p_test!(
+        test_at_least,
+        &[i32],
+        Vec<i32>,
         any_token().at_least(1),
         vec![
             (&[1], (&[], vec![1])),
@@ -2942,14 +2943,14 @@ mod tests {
             (&[1, 2, 3], (&[], vec![1, 2, 3])),
             (&[1, 2, 3, 4], (&[], vec![1, 2, 3, 4])),
         ],
-        vec![
-            &[],
-        ],
+        vec![&[],],
     );
 
     // in_range(p, ..=n) <=> at_most(p, n)
-    p_test!(test_at_most,
-        &[i32], Vec<i32>,
+    p_test!(
+        test_at_most,
+        &[i32],
+        Vec<i32>,
         any_token().at_most(3),
         vec![
             (&[], (&[], vec![])),
@@ -2961,8 +2962,10 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_sep_by,
-        &str, Vec<char>,
+    p_test!(
+        test_sep_by,
+        &str,
+        Vec<char>,
         token('a').sep_by(token('b')),
         vec![
             ("a", ("", vec!['a'])),
@@ -2973,28 +2976,23 @@ mod tests {
             ("ababaa", ("a", vec!['a', 'a', 'a'])),
             ("aababa", ("ababa", vec!['a'])),
         ],
-        vec![
-            "",
-            "b",
-            "ba",
-            "bba",
-            "xababa",
-        ],
+        vec!["", "b", "ba", "bba", "xababa",],
     );
 
-    p_test!(test_within,
-        &str, char,
+    p_test!(
+        test_within,
+        &str,
+        char,
         token('a').within(token('-')),
-        vec![
-            ("-a-", ("", 'a')),
-            ("-a-b", ("b", 'a')),
-        ],
+        vec![("-a-", ("", 'a')), ("-a-b", ("b", 'a')),],
         vec!["", "a", "-a", "a-", "-b-"],
     );
 
     // alternate way to use or() combinator
-    p_test!(test_op_bitor,
-        &str, char,
+    p_test!(
+        test_op_bitor,
+        &str,
+        char,
         token('a').boxed() | token('b').boxed(),
         vec![
             ("a", ("", 'a')),
@@ -3007,8 +3005,10 @@ mod tests {
     );
 
     // alternate way to use plus() combinator
-    p_test!(test_op_add,
-        &str, (char, char),
+    p_test!(
+        test_op_add,
+        &str,
+        (char, char),
         token('a').boxed() + token('b').boxed(),
         vec![
             ("ab", ("", ('a', 'b'))),
@@ -3016,18 +3016,14 @@ mod tests {
             ("abb", ("b", ('a', 'b'))),
             ("abc", ("c", ('a', 'b'))),
         ],
-        vec![
-            "",
-            "a",
-            "b",
-            "ba",
-            "acb",
-        ],
+        vec!["", "a", "b", "ba", "acb",],
     );
 
     // alternate way to use exactly() combinator
-    p_test!(test_op_mul,
-        &[i32], Vec<i32>,
+    p_test!(
+        test_op_mul,
+        &[i32],
+        Vec<i32>,
         any_token().boxed() * 2,
         vec![
             (&[1, 2], (&[], vec![1, 2])),
@@ -3038,8 +3034,10 @@ mod tests {
     );
 
     // alternate way to use left() combinator
-    p_test!(test_op_shl,
-        &str, char,
+    p_test!(
+        test_op_shl,
+        &str,
+        char,
         token('a').boxed() << token('b').boxed(),
         vec![
             ("ab", ("", 'a')),
@@ -3047,18 +3045,14 @@ mod tests {
             ("abb", ("b", 'a')),
             ("abc", ("c", 'a')),
         ],
-        vec![
-            "",
-            "a",
-            "b",
-            "ba",
-            "acb",
-        ],
+        vec!["", "a", "b", "ba", "acb",],
     );
 
     // alternate way to use right() combinator
-    p_test!(test_op_shr,
-        &str, char,
+    p_test!(
+        test_op_shr,
+        &str,
+        char,
         token('a').boxed() >> token('b').boxed(),
         vec![
             ("ab", ("", 'b')),
@@ -3066,39 +3060,31 @@ mod tests {
             ("abb", ("b", 'b')),
             ("abc", ("c", 'b')),
         ],
-        vec![
-            "",
-            "a",
-            "b",
-            "ba",
-            "acb",
-        ],
+        vec!["", "a", "b", "ba", "acb",],
     );
 
-    p_test!(test_any_token,
-        &str, char,
+    p_test!(
+        test_any_token,
+        &str,
+        char,
         any_token(),
-        vec![
-            ("a", ("", 'a')),
-            ("ba", ("a", 'b')),
-            ("abc", ("bc", 'a')),
-        ],
+        vec![("a", ("", 'a')), ("ba", ("a", 'b')), ("abc", ("bc", 'a')),],
         vec![""],
     );
 
-    p_test!(test_token_satisfies,
-        &str, char,
+    p_test!(
+        test_token_satisfies,
+        &str,
+        char,
         token_satisfies(|c: &char| c.is_ascii_digit()),
-        vec![
-            ("1", ("", '1')),
-            ("2a", ("a", '2')),
-            ("22", ("2", '2')),
-        ],
+        vec![("1", ("", '1')), ("2a", ("a", '2')), ("22", ("2", '2')),],
         vec!["", "a", "a2"],
     );
 
-    p_test!(test_token,
-        &[u8], u8,
+    p_test!(
+        test_token,
+        &[u8],
+        u8,
         token(42_u8),
         vec![
             (&[42], (&[], 42)),
@@ -3108,26 +3094,23 @@ mod tests {
         vec![&[], &[1], &[1, 42]],
     );
 
-    p_test!(test_string,
-        &str, &str,
+    p_test!(
+        test_string,
+        &str,
+        &str,
         string("foo"),
         vec![
             ("foo", ("", "foo")),
             ("food", ("d", "foo")),
             ("fool", ("l", "foo")),
         ],
-        vec![
-            "",
-            "f",
-            "fo",
-            "fox",
-            "fro",
-            "bar",
-        ],
+        vec!["", "f", "fo", "fox", "fro", "bar"],
     );
 
-    p_test!(test_span_string_char,
-        &str, &str,
+    p_test!(
+        test_span_string_char,
+        &str,
+        &str,
         span_string_char(|c| c.is_alphanumeric()),
         vec![
             ("foo", ("", "foo")),
@@ -3140,8 +3123,10 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_span_string_slice,
-        &str, &str,
+    p_test!(
+        test_span_string_slice,
+        &str,
+        &str,
         span_string_slice(|s| !s.starts_with("stop")),
         vec![
             ("abcdef", ("", "abcdef")),
@@ -3153,8 +3138,10 @@ mod tests {
         vec![],
     );
 
-    p_test!(test_span_slice,
-        &[i32], &[i32],
+    p_test!(
+        test_span_slice,
+        &[i32],
+        &[i32],
         span_slice(|i| *i < 3),
         vec![
             (&[], (&[], &[])),
@@ -3166,4 +3153,3 @@ mod tests {
         vec![],
     );
 }
-
