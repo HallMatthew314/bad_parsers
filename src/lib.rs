@@ -1068,6 +1068,43 @@ where
     }
 }
 
+/// Creates a [`Parser`] that tries to parse with all of the argument parsers.
+///
+/// This macro acts as a shorthand for chaining many individual parsers together with [`or`].
+/// As such, the parser created from this macro will attempt to parse the input with each
+/// [`Parser`] it was provided with, *in the order they were given*.
+/// The first time a parser succeeds, this parser will return that result.
+/// If none of the parsers succeed, then this parser will fail. Currently this parser does not
+/// provide an error implying it was created from this macro, though this is subject to change.
+///
+/// This macro requires at least two parser arguments to be invoked. This restriction exists
+/// partly for type-checking reasons, but primarily becuase trying to use this macro with
+/// less than two parsers would be unusual, and it is unclear what kind of parser the macro
+/// should produce in such a situation.
+///
+/// It also gave me a name error while I was testing the single-parser case, which as far as
+/// I'm concerned is a capital offense.
+///
+/// See also: [`or`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, first_of, string};
+///
+/// let p = first_of![string("abc"), string("ab"), string("a")];
+///
+/// assert_eq!(Ok(("", "abc")), p.parse("abc"));
+/// assert_eq!(Ok(("x", "ab")), p.parse("abx"));
+/// assert_eq!(Ok(("xy", "a")), p.parse("axy"));
+/// assert!(p.parse("no matches here").is_err());
+/// ```
+#[macro_export]
+macro_rules! first_of {
+    ($h:expr, $($p:expr),+ $(,)?) => {
+        $h
+            $( .or($p) )+
+    };
+}
+
 /// Creates a lazily-evaluated parser from another parser-building function.
 ///
 /// This implementation works by moving the builder function `f` into a closure,
@@ -1451,6 +1488,8 @@ where
 ///
 /// This combinator may also be expressed with the `|` operator if **both** `p` and `q` are
 /// [`BoxedParser`]s.
+///
+/// See also: [`first_of`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, string, token};
@@ -2495,7 +2534,38 @@ mod tests {
         };
     }
 
-    // return type of BoxedParser so it can work with lazy()
+    p_test!(
+        test_first_of_two,
+        &str,
+        &str,
+        first_of![string("ab"), string("a")],
+        vec![("ab", ("", "ab")), ("a", ("", "a")), ("aab", ("ab", "a")),],
+        vec!["", "c", "cab", "cba"],
+    );
+
+    p_test!(
+        test_first_of_many,
+        &str,
+        &str,
+        first_of![
+            string("a"),
+            string("bc"),
+            string("b"),
+            string("d"),
+            string("e"),
+        ],
+        vec![
+            ("a", ("", "a")),
+            ("aa", ("a", "a")),
+            ("bc", ("", "bc")),
+            ("ba", ("a", "b")),
+            ("da", ("a", "d")),
+            ("ea", ("a", "e")),
+        ],
+        vec!["", "f", "fabcde", "c"],
+    );
+
+    // return type is BoxedParser so it can work with lazy()
     fn panic_parser<'a>() -> BoxedParser<'a, &'a str, char, char> {
         panic!("panic parser evaluated, bug with lazy()");
     }
