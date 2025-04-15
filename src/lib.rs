@@ -350,44 +350,65 @@
 //! ```
 //! Oh.
 
-use std::fmt;
+use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
 /// The `Err` type of [`ParseResult`].
 ///
 /// And so it begins.
+#[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq)]
-pub enum ParseError {
+pub enum ParseError<Toks, T> {
+    _phantom(PhantomData<T>),
     EmptyInput,
-    MoreInput,
+    UnexpectedInput(Toks),
+    //UnexpectedInput(Toks, PhantomData<T>),
     Other(String),
 }
 
-impl ParseError {
-    pub fn empty_input<T>() -> Result<T, Self> {
+impl<Toks, T> ParseError<Toks, T> {
+    pub fn empty_input<X>() -> Result<X, Self> {
         Err(Self::EmptyInput)
     }
 
-    pub fn more_input<T>() -> Result<T, Self> {
-        Err(Self::MoreInput)
+    pub fn unexpected_input<X>(toks: Toks) -> Result<X, Self>
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        //Err(Self::UnexpectedInput(toks, PhantomData::default()))
+        Err(Self::UnexpectedInput(toks))
     }
 
-    pub fn other<T>(msg: &str) -> Result<T, Self> {
+    pub fn other<X>(msg: &str) -> Result<X, Self> {
         Err(Self::Other(msg.to_string()))
     }
 }
 
-impl fmt::Display for ParseError {
+impl<Toks, T> fmt::Display for ParseError<Toks, T>
+where
+    Toks: Tokens<T>,
+    T: Clone + Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            ParseError::_phantom(_) => {
+                panic!("you're not supposed to use this variant");
+            }
             ParseError::EmptyInput => {
                 write!(f, "Parser was expecting more input, but it was empty")
             }
-            ParseError::MoreInput => {
-                write!(f, "Parser was expecting end of input, but it found more")
+            //ParseError::UnexpectedInput(toks, _phantom) => {
+            ParseError::UnexpectedInput(toks) => {
+                write!(
+                    f,
+                    "Parser was expecting end-of-input, but it found more: {:?}",
+                    toks.preview()
+                )
             }
             ParseError::Other(message) => {
-                write!(f, "Parsing could not be completed: {}", message)
+                write!(f, "Parsing was not successful: {}", message)
             }
         }
     }
@@ -396,7 +417,7 @@ impl fmt::Display for ParseError {
 /// The `Result` type returned by parsers.
 ///
 /// A successful parser will return the remaining input as well as the value that was parsed.
-pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
+pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 
 /// Interface for collections of tokens.
 ///
@@ -522,7 +543,7 @@ pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
 pub trait Tokens<T>
 where
     Self: Sized + Deref + Copy + Clone,
-    T: Clone,
+    T: Clone + Debug,
 {
     /// Attempts to take a single token from the collection.
     ///
@@ -538,6 +559,11 @@ where
     /// When implementing this trait, there is usually an `is_empty` method for your container
     /// that you can use here.
     fn no_tokens(&self) -> bool;
+
+    /// Returns a preview of the front of the token stream.
+    ///
+    /// This method is used for error reporting.
+    fn preview(&self) -> String;
 }
 
 impl<'a> Tokens<char> for &'a str {
@@ -548,11 +574,27 @@ impl<'a> Tokens<char> for &'a str {
     fn no_tokens(&self) -> bool {
         self.is_empty()
     }
+
+    fn preview(&self) -> String {
+        let mut preview_end: usize = 35;
+
+        if self.len() <= preview_end {
+            return self.to_string();
+        }
+
+        // if the ending index if partway through a character,
+        // move it backwards until it isn't
+        while !self.is_char_boundary(preview_end) {
+            preview_end -= 1;
+        }
+
+        self[..preview_end].to_string()
+    }
 }
 
 impl<'a, T> Tokens<T> for &'a [T]
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     fn take_one(self) -> Option<(&'a [T], T)>
     where
@@ -563,6 +605,11 @@ where
 
     fn no_tokens(&self) -> bool {
         self.is_empty()
+    }
+
+    fn preview(&self) -> String {
+        let preview_end: usize = 8;
+        format!("{:?}", &self[..preview_end])
     }
 }
 
@@ -653,10 +700,10 @@ where
 pub trait Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T>,
-    T: Clone,
+    T: Clone + Debug,
 {
     /// Attempt to parse from the given input.
-    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, A>;
+    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, T, A>;
 
     /// Put `Self` into a [`BoxedParser`].
     fn boxed(self) -> BoxedParser<'a, Toks, T, A>
@@ -675,7 +722,7 @@ where
         Self: Sized + 'a,
         Toks: 'a,
         A: 'a,
-        F: Fn(ParseError) -> ParseError + 'a,
+        F: Fn(ParseError<Toks, T>) -> ParseError<Toks, T> + 'a,
     {
         set_error(self, f)
     }
@@ -947,10 +994,10 @@ where
 /// use bad_parsers::{Tokens, Parser, ParseResult, ParseError};
 ///
 /// // This function can be treated as a parser directly
-/// fn take_one<'a, Toks, T>(input: Toks) -> ParseResult<'a, Toks, T>
+/// fn take_one<'a, Toks, T>(input: Toks) -> ParseResult<'a, Toks, T, T>
 /// where
 ///     Toks: Tokens<T> + 'a,
-///     T: Clone,
+///     T: Clone + std::fmt::Debug,
 /// {
 ///     match input.take_one() {
 ///         Some((rest, t)) => Ok((rest, t)),
@@ -962,7 +1009,7 @@ where
 /// fn token<'a, Toks, T>(find: T) -> impl Parser<'a, Toks, T, T>
 /// where
 ///     Toks: Tokens<T> + 'a,
-///     T: Clone + Eq + 'a,
+///     T: Clone + std::fmt::Debug + Eq + 'a,
 /// {
 ///     move |input: Toks| match input.take_one() {
 ///         Some((rest, t)) if t == find => Ok((rest, t)),
@@ -975,11 +1022,11 @@ where
 /// ```
 impl<'a, Toks, T, A, F> Parser<'a, Toks, T, A> for F
 where
-    F: Fn(Toks) -> ParseResult<'a, Toks, A> + 'a,
+    F: Fn(Toks) -> ParseResult<'a, Toks, T, A> + 'a,
     Toks: Tokens<T>,
-    T: Clone,
+    T: Clone + Debug,
 {
-    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, A> {
+    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, T, A> {
         self(input)
     }
 }
@@ -1002,7 +1049,7 @@ impl<'a, Toks, T, A> BoxedParser<'a, Toks, T, A> {
     where
         Self: Sized + 'a,
         Toks: Tokens<T> + 'a,
-        T: Clone,
+        T: Clone + Debug,
         A: 'a,
         P: Parser<'a, Toks, T, A> + 'a,
     {
@@ -1016,9 +1063,9 @@ impl<'a, Toks, T, A> BoxedParser<'a, Toks, T, A> {
 impl<'a, Toks, T, A> Parser<'a, Toks, T, A> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T>,
-    T: Clone,
+    T: Clone + Debug,
 {
-    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, A> {
+    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, T, A> {
         self.parser.parse(input)
     }
 
@@ -1033,7 +1080,7 @@ where
 impl<'a, Toks, T, A, B> Add<BoxedParser<'a, Toks, T, B>> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
     B: 'a,
 {
@@ -1048,7 +1095,7 @@ where
 impl<'a, Toks, T, A, B> Shl<BoxedParser<'a, Toks, T, B>> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
     B: 'a,
 {
@@ -1063,7 +1110,7 @@ where
 impl<'a, Toks, T, A, B> Shr<BoxedParser<'a, Toks, T, B>> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
     B: 'a,
 {
@@ -1078,7 +1125,7 @@ where
 impl<'a, Toks, T, A> Mul<usize> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
 {
     type Output = BoxedParser<'a, Toks, T, Vec<A>>;
@@ -1092,7 +1139,7 @@ where
 impl<'a, Toks, T, A> BitOr for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
 {
     type Output = Self;
@@ -1173,7 +1220,7 @@ macro_rules! first_of {
 pub fn lazy<'a, Toks, T, A, F, P>(f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     F: Fn() -> P + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1202,9 +1249,9 @@ where
 pub fn set_error<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     P: Parser<'a, Toks, T, A> + 'a,
-    F: Fn(ParseError) -> ParseError + 'a,
+    F: Fn(ParseError<Toks, T>) -> ParseError<Toks, T> + 'a,
 {
     move |input| p.parse(input).map_err(&f)
 }
@@ -1222,7 +1269,7 @@ where
 pub fn identity<'a, Toks, T>() -> impl Parser<'a, Toks, T, ()>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
     move |input| Ok((input, ()))
 }
@@ -1246,13 +1293,13 @@ where
 pub fn eof<'a, Toks, T>() -> impl Parser<'a, Toks, T, ()>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
     move |input: Toks| {
         if input.no_tokens() {
             Ok((input, ()))
         } else {
-            ParseError::more_input()
+            ParseError::unexpected_input(input)
         }
     }
 }
@@ -1280,7 +1327,7 @@ where
 pub fn flunk<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
     |_| ParseError::other("flunked parser")
 }
@@ -1308,7 +1355,7 @@ where
 pub fn flunk_with<'a, Toks, T, A>(message: &'a str) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
     move |_| ParseError::other(message)
 }
@@ -1332,7 +1379,7 @@ where
 pub fn succeed<'a, Toks, T, A>(value: A) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: Clone + 'a,
 {
     move |input| Ok((input, value.clone()))
@@ -1357,7 +1404,7 @@ where
 pub fn succeed_default<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: Default + 'a,
 {
     move |input| Ok((input, A::default()))
@@ -1388,7 +1435,7 @@ where
 pub fn and_then<'a, Toks, T, A, P, F, Q, B>(p: P, f: F) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(A) -> Q + 'a,
@@ -1414,7 +1461,7 @@ where
 pub fn map<'a, Toks, T, A, P, F, B>(p: P, f: F) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(A) -> B + 'a,
@@ -1446,7 +1493,7 @@ where
 pub fn ignore<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, ()>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     P: Parser<'a, Toks, T, A> + 'a,
 {
     move |input1| {
@@ -1473,7 +1520,7 @@ where
 pub fn convert<'a, Toks, T, A, P, B>(p: P) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: Into<B> + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     B: 'a,
@@ -1499,7 +1546,7 @@ where
 pub fn replace<'a, Toks, T, A, P, B>(p: P, value: B) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     B: Clone + 'a,
@@ -1539,7 +1586,7 @@ where
 pub fn or<'a, Toks, T, A, P, Q>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, A> + 'a,
@@ -1573,7 +1620,7 @@ where
 pub fn recover<'a, Toks, T, A, P>(p: P, value: A) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO: figure out why rust complains about the lifetime here
+    T: Clone + Debug + 'a, // TODO: figure out why rust complains about the lifetime here
     A: Clone + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1602,7 +1649,7 @@ where
 pub fn recover_default<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO: same lifetime oddity as recover
+    T: Clone + Debug + 'a, // TODO: same lifetime oddity as recover
     A: Default + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1629,7 +1676,7 @@ where
 pub fn optional<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Option<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1669,7 +1716,7 @@ where
 pub fn ensure<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(&A) -> bool + 'a,
@@ -1710,7 +1757,7 @@ where
 pub fn reject<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(&A) -> bool + 'a,
@@ -1753,7 +1800,7 @@ where
 pub fn plus<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, (A, B)>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -1801,7 +1848,7 @@ where
 pub fn left<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO also lifetime oddity, is it map()?
+    T: Clone + Debug + 'a, // TODO also lifetime oddity, is it map()?
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -1845,7 +1892,7 @@ where
 pub fn right<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO same as above
+    T: Clone + Debug + 'a, // TODO same as above
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -1887,7 +1934,7 @@ where
 pub fn in_range<'a, Toks, T, A, P, R>(p: P, range: R) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     R: RangeBounds<usize> + 'a,
@@ -1969,7 +2016,7 @@ where
 pub fn mult<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2003,7 +2050,7 @@ where
 pub fn mult1<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2035,7 +2082,7 @@ where
 pub fn exactly<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2069,7 +2116,7 @@ where
 pub fn at_least<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2100,7 +2147,7 @@ where
 pub fn at_most<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2158,7 +2205,7 @@ where
 pub fn sep_by<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -2211,7 +2258,7 @@ where
 pub fn within<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -2256,7 +2303,7 @@ pub fn between<'a, Toks, T, A, P, Q, B, R, C>(
 ) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -2287,7 +2334,7 @@ where
 pub fn any_token<'a, Toks, T>() -> impl Parser<'a, Toks, T, T>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
     move |input: Toks| match input.take_one() {
         None => ParseError::empty_input(),
@@ -2319,7 +2366,7 @@ where
 pub fn token_satisfies<'a, Toks, T, F>(f: F) -> impl Parser<'a, Toks, T, T>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     F: Fn(&T) -> bool + 'a,
 {
     ensure(any_token(), f)
@@ -2343,7 +2390,7 @@ where
 pub fn token<'a, Toks, T>(tok: T) -> impl Parser<'a, Toks, T, T>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + PartialEq + 'a,
+    T: Clone + Debug + PartialEq + 'a,
 {
     token_satisfies(move |t| *t == tok)
 }
@@ -2490,7 +2537,7 @@ where
 /// ```
 pub fn span_slice<'a, T, F>(f: F) -> impl Parser<'a, &'a [T], T, &'a [T]>
 where
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     F: Fn(&T) -> bool + 'a,
 {
     move |input: &'a [T]| {
