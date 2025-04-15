@@ -1194,6 +1194,8 @@ where
 /// coerced into whatever is needed to make it fit in your parser chain.
 ///
 /// It's usually a good idea to set the error of this parser to something meaningful.
+///
+/// See also: [`flunk`], [`set_error`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, flunk};
@@ -1209,6 +1211,34 @@ where
     T: Clone,
 {
     |_| Err("flunked parser".to_string())
+}
+
+/// Creates a parser that always fails with a specified error.
+///
+/// This parser will always fail regardless of the input.
+///
+/// Since it never actually returns a value, the return type of this parser can be
+/// coerced into whatever is needed to make it fit in your parser chain.
+///
+/// This function can be used as a more conveinient way to create a failing parser with a custom
+/// message than calling [`flunk`] and then [`set_error`].
+///
+/// See also: [`flunk`], [`set_error`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, flunk_with};
+///
+/// let p = flunk_with::<&str, char, ()>("custom message".to_string());
+///
+/// assert_eq!(Err("custom message".to_string()), p.parse(""));
+/// assert_eq!(Err("custom message".to_string()), p.parse("foo"));
+/// ```
+pub fn flunk_with<'a, Toks, T, A>(msg: String) -> impl Parser<'a, Toks, T, A>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone,
+{
+    move |_| Err(msg.clone())
 }
 
 /// Creates a parser that always succeeds with the given value.
@@ -2571,6 +2601,15 @@ mod tests {
         vec![],
         vec!["", "foo", "anything"],
     );
+
+    #[test]
+    fn test_flunk_with() {
+        let p = flunk_with::<&str, char, ()>("message".to_string());
+
+        assert_eq!(Err("message".to_string()), p.parse(""));
+        assert_eq!(Err("message".to_string()), p.parse("foo"));
+        assert_eq!(Err("message".to_string()), p.parse("anything"));
+    }
 
     p_test!(
         test_and_then,
