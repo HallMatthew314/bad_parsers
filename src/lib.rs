@@ -351,13 +351,21 @@
 //! Oh.
 
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
+use std::fmt;
 
-/// Alias for the `Err` type of [`ParseResult`].
+/// The `Err` type of [`ParseResult`].
 ///
-/// For now it's just a string.
-/// This might change to allow for different error types on different parsers if I can be bothered
-/// to try and make that work.
-pub type ParseError = String;
+/// And so it begins.
+#[derive(Debug)]
+pub struct ParseError<Toks, T> {
+    kind: String,
+    message: String,
+    location: Option<Toks>,
+}
+
+//impl fmt::Display for ParseError {
+    //
+//}
 
 /// The `Result` type returned by parsers.
 ///
