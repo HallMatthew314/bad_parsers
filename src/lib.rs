@@ -76,13 +76,13 @@
 //! This is normally done by returning a [closure with the approriate
 //! signature](Parser#impl-Parser<'a,+Toks,+T,+A>-for-F):
 //! ```
-//! use bad_parsers::Parser;
+//! use bad_parsers::{Parser, ParseError};
 //!
 //! // parses a single i32 token if it's even
 //! fn custom_parser<'a>() -> impl Parser<'a, &'a [i32], i32, i32> {
 //!     |input: &'a [i32]| match input.iter().next() {
 //!         Some(x) if x % 2 == 0 => Ok((&input[1..], *x)),
-//!         _                     => Err("no even int".to_string()),
+//!         _ => ParseError::other("no even int"),
 //!     }
 //! }
 //!
@@ -95,7 +95,7 @@
 //!
 //! let p = custom_parser();
 //!
-//! assert_eq!(Err("no even int".to_string()), p.parse(starts_with1));
+//! assert_eq!(Err(ParseError::Other("no even int".to_string())), p.parse(starts_with1));
 //! assert_eq!(Ok((starts_with3, 2)), p.parse(starts_with2));
 //! ```
 //! Note the above example alludes to a quirk to do with the lifetimes of inputs.
@@ -175,8 +175,8 @@
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
-//! It's safe to unwrap the result of [`to_digit`](char::to_digit) here because it should only receive actual digit
-//! characters as inputs.
+//! It's safe to unwrap the result of [`to_digit`](char::to_digit) here because it should
+//! only receive actual digit characters as inputs.
 //!
 //! With that, we're almost there!
 //! Our digits are now actual numbers.
@@ -350,22 +350,48 @@
 //! ```
 //! Oh.
 
-use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 use std::fmt;
+use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
 /// The `Err` type of [`ParseResult`].
 ///
 /// And so it begins.
-#[derive(Debug)]
-pub struct ParseError<Toks, T> {
-    kind: String,
-    message: String,
-    location: Option<Toks>,
+#[derive(Debug, PartialEq)]
+pub enum ParseError {
+    EmptyInput,
+    MoreInput,
+    Other(String),
 }
 
-//impl fmt::Display for ParseError {
-    //
-//}
+impl ParseError {
+    pub fn empty_input<T>() -> Result<T, Self> {
+        Err(Self::EmptyInput)
+    }
+
+    pub fn more_input<T>() -> Result<T, Self> {
+        Err(Self::MoreInput)
+    }
+
+    pub fn other<T>(msg: &str) -> Result<T, Self> {
+        Err(Self::Other(msg.to_string()))
+    }
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParseError::EmptyInput => {
+                write!(f, "Parser was expecting more input, but it was empty")
+            }
+            ParseError::MoreInput => {
+                write!(f, "Parser was expecting end of input, but it found more")
+            }
+            ParseError::Other(message) => {
+                write!(f, "Parsing could not be completed: {}", message)
+            }
+        }
+    }
+}
 
 /// The `Result` type returned by parsers.
 ///
@@ -918,7 +944,7 @@ where
 ///
 /// ## Examples
 /// ```
-/// use bad_parsers::{Tokens, Parser, ParseResult};
+/// use bad_parsers::{Tokens, Parser, ParseResult, ParseError};
 ///
 /// // This function can be treated as a parser directly
 /// fn take_one<'a, Toks, T>(input: Toks) -> ParseResult<'a, Toks, T>
@@ -928,7 +954,7 @@ where
 /// {
 ///     match input.take_one() {
 ///         Some((rest, t)) => Ok((rest, t)),
-///         None            => Err("no tokens".to_string())
+///         None => ParseError::other("no tokens")
 ///     }
 /// }
 ///
@@ -940,7 +966,7 @@ where
 /// {
 ///     move |input: Toks| match input.take_one() {
 ///         Some((rest, t)) if t == find => Ok((rest, t)),
-///         _ => Err("could not find specified token".to_string()),
+///         _ => ParseError::other("could not find specified token"),
 ///     }
 /// }
 ///
@@ -1160,17 +1186,17 @@ where
 ///
 /// ## Examples
 /// ```
-/// use bad_parsers::{Parser, token};
+/// use bad_parsers::{Parser, ParseError, token};
 ///
 /// let p1 = token('a');
-/// let p2 = token('a').set_error(|_| "custom message".to_string());
+/// let p2 = token('a').set_error(|_| ParseError::Other("custom message".to_string()));
 ///
 /// // Fails with default error message
 /// let msg1 = p1.parse("b").unwrap_err();
 /// // Fails with custom error message
 /// let msg2 = p2.parse("b").unwrap_err();
 ///
-/// assert_eq!("custom message".to_string(), msg2);
+/// assert_eq!(ParseError::other::<()>("custom message").unwrap_err(), msg2);
 /// assert_ne!(msg1, msg2);
 /// ```
 pub fn set_error<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
@@ -1226,7 +1252,7 @@ where
         if input.no_tokens() {
             Ok((input, ()))
         } else {
-            Err("expected eof, found more tokens".to_string())
+            ParseError::more_input()
         }
     }
 }
@@ -1238,24 +1264,25 @@ where
 /// Since it never actually returns a value, the return type of this parser can be
 /// coerced into whatever is needed to make it fit in your parser chain.
 ///
-/// It's usually a good idea to set the error of this parser to something meaningful.
+/// It's usually a good idea to manually change the error of this parser into something
+/// meaningful.
 ///
 /// See also: [`flunk`], [`set_error`].
 /// ## Examples
 /// ```
-/// use bad_parsers::{Parser, flunk};
+/// use bad_parsers::{Parser, ParseError, flunk};
 ///
-/// let p = flunk::<&str, char, ()>().set_error(|_| "something meaningful".to_string());
+/// let p = flunk::<&str, char, ()>();
 ///
-/// assert_eq!(Err("something meaningful".to_string()), p.parse(""));
-/// assert_eq!(Err("something meaningful".to_string()), p.parse("foo"));
+/// assert_eq!(ParseError::other("flunked parser"), p.parse(""));
+/// assert_eq!(ParseError::other("flunked parser"), p.parse("foo"));
 /// ```
 pub fn flunk<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
     T: Clone,
 {
-    |_| Err("flunked parser".to_string())
+    |_| ParseError::other("flunked parser")
 }
 
 /// Creates a parser that always fails with a specified error.
@@ -1271,19 +1298,19 @@ where
 /// See also: [`flunk`], [`set_error`].
 /// ## Examples
 /// ```
-/// use bad_parsers::{Parser, flunk_with};
+/// use bad_parsers::{Parser, ParseError, flunk_with};
 ///
-/// let p = flunk_with::<&str, char, ()>("custom message".to_string());
+/// let p = flunk_with::<&str, char, ()>("custom message");
 ///
-/// assert_eq!(Err("custom message".to_string()), p.parse(""));
-/// assert_eq!(Err("custom message".to_string()), p.parse("foo"));
+/// assert_eq!(ParseError::other("custom message"), p.parse(""));
+/// assert_eq!(ParseError::other("custom message"), p.parse("foo"));
 /// ```
-pub fn flunk_with<'a, Toks, T, A>(msg: String) -> impl Parser<'a, Toks, T, A>
+pub fn flunk_with<'a, Toks, T, A>(message: &'a str) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
     T: Clone,
 {
-    move |_| Err(msg.clone())
+    move |_| ParseError::other(message)
 }
 
 /// Creates a parser that always succeeds with the given value.
@@ -1649,7 +1676,7 @@ where
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) if f(&x) => Ok((rest, x)),
-        _ => Err("predicate failed".to_string()),
+        _ => ParseError::other("predicate of ensure failed"),
     }
 }
 
@@ -1886,7 +1913,7 @@ where
 
         // not possible to parse a correct number of values
         if max < min {
-            return Err(format!("impossible parser range: {}..={}", min, max));
+            return ParseError::other(&format!("impossible parser range: {}..={}", min, max));
         }
 
         let mut values = vec![];
@@ -1904,7 +1931,7 @@ where
         }
 
         if values.len() < min {
-            Err(format!(
+            ParseError::other(&format!(
                 "needed to parse {} elements, only got {}",
                 min,
                 values.len()
@@ -2262,10 +2289,9 @@ where
     Toks: Tokens<T> + 'a,
     T: Clone,
 {
-    move |input: Toks| {
-        input
-            .take_one()
-            .ok_or("expected a token, got eof".to_string())
+    move |input: Toks| match input.take_one() {
+        None => ParseError::empty_input(),
+        Some((rest, t)) => Ok((rest, t)),
     }
 }
 
@@ -2325,7 +2351,8 @@ where
 /// Parses a literal string slice.
 ///
 /// This parser is essentially a wrapper for [`&str::strip_prefix`].
-/// As such, this parser will succeed if the front of the input matches the provided string slice.
+/// As such, this parser will succeed if the front of the input matches the provided string
+/// slice.
 ///
 /// Note that the output of this parser is a [`&str`], not an owned [`String`].
 /// ## Examples
@@ -2345,15 +2372,16 @@ where
 pub fn string<'a>(target: &'a str) -> impl Parser<'a, &'a str, char, &'a str> {
     move |input: &'a str| match input.strip_prefix(target) {
         Some(rest) => Ok((rest, target)),
-        None => Err(format!("could not parse string literal:{:?}", target)),
+        None => ParseError::other(&format!("could not parse string literal:{:?}", target)),
     }
 }
 
 /// Parses from a string slice while the given predicate holds true, per character.
 ///
-/// This parser iterates through each [`char`] in the input and checks if it passes the predicate.
-/// Once it has found a [`char`] that does not pass the predicate, or reaches the end of the input,
-/// the parser splits the input at that point and returns the front.
+/// This parser iterates through each [`char`] in the input and checks if it passes the
+/// predicate.
+/// Once it has found a [`char`] that does not pass the predicate, or reaches the end of the
+/// input, the parser splits the input at that point and returns the front.
 ///
 /// Note that the output of this parser is a [`&str`], not an owned [`String`].
 ///
@@ -2621,10 +2649,11 @@ mod tests {
 
     #[test]
     fn test_set_error() {
-        let p = token('a').set_error(|_| "custom message".to_string());
+        // i am so mad i have to build the error manually
+        let p = token('a').set_error(|_| ParseError::Other("custom message".to_string()));
 
         assert_eq!(Ok(("", 'a')), p.parse("a"));
-        assert_eq!(Err("custom message".to_string()), p.parse("b"));
+        assert_eq!(ParseError::other("custom message"), p.parse("b"));
     }
 
     p_test!(
@@ -2682,11 +2711,11 @@ mod tests {
 
     #[test]
     fn test_flunk_with() {
-        let p = flunk_with::<&str, char, ()>("message".to_string());
+        let p = flunk_with::<&str, char, ()>("message");
 
-        assert_eq!(Err("message".to_string()), p.parse(""));
-        assert_eq!(Err("message".to_string()), p.parse("foo"));
-        assert_eq!(Err("message".to_string()), p.parse("anything"));
+        assert_eq!(ParseError::other("message"), p.parse(""));
+        assert_eq!(ParseError::other("message"), p.parse("foo"));
+        assert_eq!(ParseError::other("message"), p.parse("anything"));
     }
 
     p_test!(
