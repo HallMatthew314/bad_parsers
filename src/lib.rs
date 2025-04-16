@@ -96,7 +96,7 @@
 //! let p = custom_parser();
 //!
 //! assert!(p.parse(starts_with1).is_err());
-//! assert_eq!(Ok((starts_with3, 2)), p.parse(starts_with2));
+//! assert_eq!((starts_with3, 2), p.parse(starts_with2).unwrap());
 //! ```
 //! Note the above example alludes to a quirk to do with the lifetimes of inputs.
 //! That is explained more in-depth in the documentation of the [`Parser`] trait.
@@ -124,9 +124,9 @@
 //!
 //! let front_number = token_satisfies(char::is_ascii_digit);
 //!
-//! assert_eq!(Ok(("23", '1')), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", '3')), front_number.parse("3rest"));
-//! assert_eq!(Ok(("0rest", '3')), front_number.parse("30rest"));
+//! assert_eq!(("23", '1'), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", '3'), front_number.parse("3rest").unwrap());
+//! assert_eq!(("0rest", '3'), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
@@ -146,9 +146,9 @@
 //!
 //! let front_number = token_satisfies(char::is_ascii_digit).mult1();
 //!
-//! assert_eq!(Ok(("", vec!['1', '2', '3'])), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", vec!['3'])), front_number.parse("3rest"));
-//! assert_eq!(Ok(("rest", vec!['3', '0'])), front_number.parse("30rest"));
+//! assert_eq!(("", vec!['1', '2', '3']), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", vec!['3']), front_number.parse("3rest").unwrap());
+//! assert_eq!(("rest", vec!['3', '0']), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
@@ -169,9 +169,9 @@
 //!     .map(|c| c.to_digit(10).unwrap())
 //!     .mult1();
 //!
-//! assert_eq!(Ok(("", vec![1, 2, 3])), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", vec![3])), front_number.parse("3rest"));
-//! assert_eq!(Ok(("rest", vec![3, 0])), front_number.parse("30rest"));
+//! assert_eq!(("", vec![1, 2, 3]), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", vec![3]), front_number.parse("3rest").unwrap());
+//! assert_eq!(("rest", vec![3, 0]), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
@@ -198,9 +198,9 @@
 //!         n
 //!     });
 //!
-//! assert_eq!(Ok(("", 123)), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", 3)), front_number.parse("3rest"));
-//! assert_eq!(Ok(("rest", 30)), front_number.parse("30rest"));
+//! assert_eq!(("", 123), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", 3), front_number.parse("3rest").unwrap());
+//! assert_eq!(("rest", 30), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
@@ -349,21 +349,21 @@
 //! assert_ne!("time taken", "well-spent");
 //! ```
 //! Oh.
-
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum ErrorType<Toks> {
+#[derive(Debug)]
+enum ErrorType<Toks> {
+    NoParse {
+        loc: Toks,
+    },
     EmptyInput,
     UnexpectedInput {
         loc: Toks,
     },
     Flunk {
-        loc: Toks,
-    },
-    NoParse {
+        #[doc(hidden)]
         loc: Toks,
     },
     NotEnough {
@@ -372,15 +372,31 @@ pub enum ErrorType<Toks> {
         got: usize,
     },
     Other {
+        cause: Box<dyn std::error::Error>,
         loc: Toks,
     },
 }
 
 /// The `Err` type of [`ParseResult`].
 ///
-/// And so it begins.
-#[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq)]
+/// Instances of this struct are returned by parsers when they are unsuccessful.
+///
+/// This type provides various functions and methods for the creation and modification of
+/// error values.
+/// It is not advised to create values of [`ParseError`] without one of the provided constructor
+/// functions, nor to pattern-match or destructure this type.
+/// The reason as to why this is the case is ~~because Rust is a temperamental pile of
+/// garbage~~ due to some quirks with Rust's type system.
+///
+/// Constructing different kinds of errors with this type will require providing differing
+/// amounts of information depending on the specificity of the error type.
+/// An error type like [`ParseError::not_enough`] requires providing extra information related
+/// to the number of parsed elements, while [`ParseError::empty_input`] requires no extra
+/// information at all.
+/// The two most common values to give a constructor are:
+/// * a `&str` providing extra human-readable information about this specific failure
+/// * a `Toks` providing the input that the parser failed to parse from
+#[derive(Debug)]
 pub struct ParseError<Toks, T> {
     error_type: ErrorType<Toks>,
     details: Option<String>,
@@ -388,6 +404,7 @@ pub struct ParseError<Toks, T> {
 }
 
 impl<Toks, T> ParseError<Toks, T> {
+    /// Signals that a parser has failed to parse due to the input ending sooner than expected.
     pub fn empty_input() -> Self {
         Self {
             error_type: ErrorType::EmptyInput,
@@ -396,6 +413,10 @@ impl<Toks, T> ParseError<Toks, T> {
         }
     }
 
+    /// Signals that a parser has failed to parse because it expected the input to be empty,
+    /// but it was not.
+    ///
+    /// See also: [`eof`].
     pub fn unexpected_input(loc: Toks) -> Self
     where
         Toks: Tokens<T>,
@@ -408,6 +429,9 @@ impl<Toks, T> ParseError<Toks, T> {
         }
     }
 
+    /// Signals that a parser has failed intentionally.
+    ///
+    /// See also: [`flunk`], [`flunk_with`].
     pub fn flunk(details: &str, loc: Toks) -> Self
     where
         Toks: Tokens<T>,
@@ -420,6 +444,11 @@ impl<Toks, T> ParseError<Toks, T> {
         }
     }
 
+    /// Signals that a parser has failed to parse whatever it was trying to parse.
+    ///
+    /// This variant is intended to be the generic failure type.
+    /// When you need your parser to fail and you are unsure of which error type to use, you
+    /// should probably use this one.
     pub fn no_parse(details: &str, loc: Toks) -> Self
     where
         Toks: Tokens<T>,
@@ -432,6 +461,13 @@ impl<Toks, T> ParseError<Toks, T> {
         }
     }
 
+    /// Signals that a parser has failed due to being unable to parse as many elements as it
+    /// should have.
+    ///
+    /// This variant is intended to be used by parsers that repeatedly run *a single, specific
+    /// parser* in order to collect multiple elements.
+    ///
+    /// See also: [`at_least`], [`in_range`], [`mult1`], [`sep_by`].
     pub fn not_enough(loc: Toks, needed: usize, got: usize) -> Self
     where
         Toks: Tokens<T>,
@@ -439,27 +475,42 @@ impl<Toks, T> ParseError<Toks, T> {
     {
         Self {
             error_type: ErrorType::NotEnough { loc, needed, got },
-            details: None, //Some(details.to_owned()),
+            details: None,
             _phantom: PhantomData,
         }
     }
 
-    pub fn other(details: &str, loc: Toks) -> Self {
+    /// Signals that a parser has failed due to a non-specific reason.
+    ///
+    /// This variant is intended to be used when parsing was not successful due to factors
+    /// outside of the parsing chain, such as [I/O errors](std::io::Error).
+    /// A more robust system of forwarding arbitrary error types may be implemented in the
+    /// future.
+    ///
+    /// If your parser simply fails to parse, but not for any of the reasons associated with
+    /// the other variants, you should use [`ParseError::no_parse`], not this.
+    pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
         Self {
-            error_type: ErrorType::Other { loc },
-            details: Some(details.to_owned()),
+            error_type: ErrorType::Other { cause: Box::new(cause), loc },
+            details: None,
             _phantom: PhantomData,
         }
     }
 
+    /// Returns the specific details of this failure, if there are any.
     pub fn get_details(&self) -> Option<&str> {
         self.details.as_deref()
     }
 
+    /// Overwrites the specific details of this failure.
     pub fn set_details(&mut self, msg: &str) {
         self.details = Some(msg.to_owned());
     }
 
+    /// Returns the input that was unable to be parsed from.
+    ///
+    /// Not all error types are able to provide a meaningful input state to report, hence why
+    /// this function returns an [`Option`].
     pub fn get_loc(&self) -> Option<Toks>
     where
         Toks: Clone + Copy,
@@ -470,7 +521,7 @@ impl<Toks, T> ParseError<Toks, T> {
             | ErrorType::Flunk { loc }
             | ErrorType::NoParse { loc }
             | ErrorType::NotEnough { loc, .. }
-            | ErrorType::Other { loc } => Some(loc),
+            | ErrorType::Other { loc, .. } => Some(loc),
         }
     }
 }
@@ -496,11 +547,10 @@ where
                     loc.preview()
                 )
             }
-            ErrorType::Other { loc } => {
+            ErrorType::Other { loc, .. } => {
                 write!(
                     f,
-                    "Parser was unsuccessful: {}, Failed at: {}",
-                    details,
+                    "An error occurred while parsing, Failed at: {}",
                     loc.preview()
                 )
             }
@@ -515,7 +565,7 @@ where
             ErrorType::NoParse { loc } => {
                 write!(
                     f,
-                    "Parsing was unsuccessful: {}, Failed at: {}",
+                    "Parser was unsuccessful: {}, Failed at: {}",
                     details,
                     loc.preview()
                 )
@@ -531,32 +581,27 @@ where
                 )
             }
         }
-        /*match self {
-            ParseError::_phantom_do_not_use_or_you_will_be_fired(_p, _v) => {
-                unreachable!("Display::fmt called for ParseError phantom variant, this should be impossible");
-            }
-            ParseError::EmptyInput => {
-                write!(f, "Parser was expecting more input, but it was empty")
-            }
-            //ParseError::UnexpectedInput(toks, _phantom) => {
-            ParseError::UnexpectedInput(toks) => {
-                write!(
-                    f,
-                    "Parser was expecting end-of-input, but it found more: {:?}",
-                    toks.preview()
-                )
-            }
-            ParseError::Other(message, _loc) => {
-                write!(f, "Parsing was not successful: {}", message)
-            }
+    }
+}
+
+impl<Toks, T> std::error::Error for ParseError<Toks, T>
+where
+    Toks: Tokens<T> + Debug,
+    T: Clone + Debug,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        if let ErrorType::Other { cause, .. } = &self.error_type {
+            cause.source()
+        } else {
+            None
         }
-        */
     }
 }
 
 /// The `Result` type returned by parsers.
 ///
 /// A successful parser will return the remaining input as well as the value that was parsed.
+/// A failed parser will return a [`ParseError`] detailing why the parser failed.
 pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 
 /// Interface for collections of tokens.
@@ -719,7 +764,7 @@ impl<'a> Tokens<char> for &'a str {
         let mut preview_end: usize = 35;
 
         if self.len() <= preview_end {
-            return self.to_string();
+            return format!("\"{}\"", &self);
         }
 
         // if the ending index if partway through a character,
@@ -728,7 +773,7 @@ impl<'a> Tokens<char> for &'a str {
             preview_end -= 1;
         }
 
-        self[..preview_end].to_string()
+        format!("\"{} ...\"", &self[..preview_end])
     }
 }
 
@@ -765,8 +810,8 @@ where
 /// * `A: 'a` - the type of what this parser tries to parse.
 ///
 /// Please note that the constraints listed here are only the most fundamental constraints.
-/// Other functions in this library will usually require other constraints to be satisfied in order
-/// for them to work properly.
+/// Other functions in this library will usually require other constraints to be satisfied
+/// in order for them to work properly.
 /// Please see the documentation for the [`Tokens<T>`] trait for more information about the
 /// constraints of parser inputs.
 ///
@@ -784,7 +829,7 @@ where
 ///
 /// let r1 = p1.parse("abcd");
 /// let r2 = p2.parse("abcd");
-/// assert_eq!(r1, r2);
+/// assert_eq!(r1.unwrap(), r2.unwrap());
 /// ```
 /// An issue you may encounter when parsing from non-static inputs is that, depending on how your
 /// code is organized, the compiler may determine your input will not live long enough for your
@@ -800,7 +845,7 @@ where
 /// let nums = [1, 2, 3, 4, 5, 6];
 /// let nums_slice = nums.as_slice();
 ///
-/// assert_eq!(Ok((&nums_slice[2..], (1, 2))), two_tokens.parse(nums_slice));
+/// assert_eq!((&nums_slice[2..], (1, 2)), two_tokens.parse(nums_slice).unwrap());
 /// ```
 /// Trying to compile the above code will produce an error that looks somthing like this:
 /// ```txt
@@ -835,7 +880,7 @@ where
 /// // Parser defined second
 /// let two_tokens = any_token().plus(any_token());
 ///
-/// assert_eq!(Ok((&nums_slice[2..], (1, 2))), two_tokens.parse(nums_slice));
+/// assert_eq!((&nums_slice[2..], (1, 2)), two_tokens.parse(nums_slice).unwrap());
 /// ```
 pub trait Parser<'a, Toks, T, A>
 where
@@ -856,15 +901,15 @@ where
         BoxedParser::new(self)
     }
 
-    /// Method version of [`set_error`].
-    fn set_error<F>(self, f: F) -> impl Parser<'a, Toks, T, A>
+    /// Method version of [`map_error`].
+    fn map_error<F>(self, f: F) -> impl Parser<'a, Toks, T, A>
     where
         Self: Sized + 'a,
         Toks: 'a,
         A: 'a,
         F: Fn(ParseError<Toks, T>) -> ParseError<Toks, T> + 'a,
     {
-        set_error(self, f)
+        map_error(self, f)
     }
 
     /// Method version of [`and_then`].
@@ -1166,8 +1211,8 @@ where
 ///     }
 /// }
 ///
-/// assert_eq!(Ok(("bcd", 'a')), take_one.parse("abcd"));
-/// assert_eq!(Ok(("bcd", 'a')), token('a').parse("abcd"));
+/// assert_eq!(("bcd", 'a'), take_one.parse("abcd").unwrap());
+/// assert_eq!(("bcd", 'a'), token('a').parse("abcd").unwrap());
 /// ```
 impl<'a, Toks, T, A, F> Parser<'a, Toks, T, A> for F
 where
@@ -1322,9 +1367,9 @@ where
 ///
 /// let p = first_of![string("abc"), string("ab"), string("a")];
 ///
-/// assert_eq!(Ok(("", "abc")), p.parse("abc"));
-/// assert_eq!(Ok(("x", "ab")), p.parse("abx"));
-/// assert_eq!(Ok(("xy", "a")), p.parse("axy"));
+/// assert_eq!(("", "abc"), p.parse("abc").unwrap());
+/// assert_eq!(("x", "ab"), p.parse("abx").unwrap());
+/// assert_eq!(("xy", "a"), p.parse("axy").unwrap());
 /// assert!(p.parse("no matches here").is_err());
 /// ```
 #[macro_export]
@@ -1362,9 +1407,9 @@ macro_rules! first_of {
 /// let p = recursive_parser();
 ///
 /// assert!(p.parse("c").is_err());
-/// assert_eq!(Ok(("", 'b')), p.parse("b"));
-/// assert_eq!(Ok(("", 'b')), p.parse("ab"));
-/// assert_eq!(Ok(("", 'b')), p.parse("aaab"));
+/// assert_eq!(("", 'b'), p.parse("b").unwrap());
+/// assert_eq!(("", 'b'), p.parse("ab").unwrap());
+/// assert_eq!(("", 'b'), p.parse("aaab").unwrap());
 /// ```
 pub fn lazy<'a, Toks, T, A, F, P>(f: F) -> impl Parser<'a, Toks, T, A>
 where
@@ -1385,20 +1430,22 @@ where
 /// use bad_parsers::{Parser, ParseError, token};
 ///
 /// let p1 = token('a');
-/// let p2 = token('a').set_error(|mut e| {
+/// let p2 = token('a').map_error(|mut e| {
 ///     e.set_details("custom message");
 ///     e
 /// });
 ///
 /// // Fails with default error message
-/// let msg1 = p1.parse("b").unwrap_err();
+/// let expected1 = "Parser was unsuccessful: predicate of ensure failed, Failed at: \"b\"";
+/// let msg1 = p1.parse("b").unwrap_err().to_string();
 /// // Fails with custom error message
-/// let msg2 = p2.parse("b").unwrap_err();
+/// let expected2 = "Parser was unsuccessful: custom message, Failed at: \"b\"";
+/// let msg2 = p2.parse("b").unwrap_err().to_string();
 ///
-/// assert_eq!(ParseError::other("custom message", "b"), msg2);
-/// assert_ne!(msg1, msg2);
+/// assert_eq!(expected1, msg1);
+/// assert_eq!(expected2, msg2);
 /// ```
-pub fn set_error<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
+pub fn map_error<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
     T: Clone + Debug,
@@ -1416,7 +1463,7 @@ where
 ///
 /// let p = identity();
 ///
-/// assert_eq!(Ok(("what did you expect?", ())), p.parse("what did you expect?"));
+/// assert_eq!(("what did you expect?", ()), p.parse("what did you expect?").unwrap());
 /// ```
 pub fn identity<'a, Toks, T>() -> impl Parser<'a, Toks, T, ()>
 where
@@ -1439,7 +1486,7 @@ where
 ///
 /// let p = token('a').left(eof());
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
 /// assert!(p.parse("a and some other stuff").is_err());
 /// ```
 pub fn eof<'a, Toks, T>() -> impl Parser<'a, Toks, T, ()>
@@ -1466,15 +1513,17 @@ where
 /// It's usually a good idea to manually change the error of this parser into something
 /// meaningful.
 ///
-/// See also: [`flunk`], [`set_error`].
+/// See also: [`flunk`], [`map_error`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, ParseError, flunk};
 ///
 /// let p = flunk::<&str, char, ()>();
 ///
-/// assert_eq!(ParseError::flunk("flunked parser", ""), p.parse("").unwrap_err());
-/// assert_eq!(ParseError::flunk("flunked parser", "foo"), p.parse("foo").unwrap_err());
+/// let msg1 = format!("Parser flunked: flunked parser, Flunked at: \"\"");
+/// let msg2 = format!("Parser flunked: flunked parser, Flunked at: \"foo\"");
+/// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
+/// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
 /// ```
 pub fn flunk<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
@@ -1492,17 +1541,20 @@ where
 /// coerced into whatever is needed to make it fit in your parser chain.
 ///
 /// This function can be used as a more conveinient way to create a failing parser with a custom
-/// message than calling [`flunk`] and then [`set_error`].
+/// message than calling [`flunk`] and then [`map_error`].
 ///
-/// See also: [`flunk`], [`set_error`].
+/// See also: [`flunk`], [`map_error`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, ParseError, flunk_with};
 ///
 /// let p = flunk_with::<&str, char, ()>("custom message");
 ///
-/// assert_eq!(ParseError::flunk("custom message", ""), p.parse("").unwrap_err());
-/// assert_eq!(ParseError::flunk("custom message", "foo"), p.parse("foo").unwrap_err());
+/// let msg1 = format!("Parser flunked: custom message, Flunked at: \"\"");
+/// let msg2 = format!("Parser flunked: custom message, Flunked at: \"foo\"");
+/// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
+/// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
+
 /// ```
 pub fn flunk_with<'a, Toks, T, A>(message: &'a str) -> impl Parser<'a, Toks, T, A>
 where
@@ -1525,8 +1577,8 @@ where
 ///
 /// let p = succeed(42);
 ///
-/// assert_eq!(Ok(("", 42)), p.parse(""));
-/// assert_eq!(Ok(("foo", 42)), p.parse("foo"));
+/// assert_eq!(("", 42), p.parse("").unwrap());
+/// assert_eq!(("foo", 42), p.parse("foo").unwrap());
 /// ```
 pub fn succeed<'a, Toks, T, A>(value: A) -> impl Parser<'a, Toks, T, A>
 where
@@ -1550,8 +1602,8 @@ where
 /// let p = succeed_default::<&str, char, u32>();
 /// let expected = u32::default();
 ///
-/// assert_eq!(Ok(("", expected)), p.parse(""));
-/// assert_eq!(Ok(("foo", expected)), p.parse("foo"));
+/// assert_eq!(("", expected), p.parse("").unwrap());
+/// assert_eq!(("foo", expected), p.parse("foo").unwrap());
 /// ```
 pub fn succeed_default<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
@@ -1579,8 +1631,8 @@ where
 /// // Parses any token if it occurs twice in a row, only returns one copy
 /// let p = any_token().and_then(|t| token(t));
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("aa"));
-/// assert_eq!(Ok(("a", 'b')), p.parse("bba"));
+/// assert_eq!(("", 'a'), p.parse("aa").unwrap());
+/// assert_eq!(("a", 'b'), p.parse("bba").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse("ab").is_err());
 /// ```
@@ -1607,7 +1659,7 @@ where
 ///
 /// let p = token('a').map(u32::from);
 ///
-/// assert_eq!(Ok(("", 97)), p.parse("a"));
+/// assert_eq!(("", 97), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn map<'a, Toks, T, A, P, F, B>(p: P, f: F) -> impl Parser<'a, Toks, T, B>
@@ -1639,7 +1691,7 @@ where
 ///
 /// let p = token('a').ignore();
 ///
-/// assert_eq!(Ok(("", ())), p.parse("a"));
+/// assert_eq!(("", ()), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn ignore<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, ()>
@@ -1666,7 +1718,7 @@ where
 ///
 /// let p = token('a').convert();
 ///
-/// assert_eq!(Ok(("", 97_u32)), p.parse("a"));
+/// assert_eq!(("", 97_u32), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn convert<'a, Toks, T, A, P, B>(p: P) -> impl Parser<'a, Toks, T, B>
@@ -1692,7 +1744,7 @@ where
 ///
 /// let p = token('a').replace(42);
 ///
-/// assert_eq!(Ok(("", 42)), p.parse("a"));
+/// assert_eq!(("", 42), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn replace<'a, Toks, T, A, P, B>(p: P, value: B) -> impl Parser<'a, Toks, T, B>
@@ -1731,8 +1783,8 @@ where
 /// // will try to parse "ab" before "a"
 /// let p = string("ab").or(string("a"));
 ///
-/// assert_eq!(Ok(("", "ab")), p.parse("ab"));
-/// assert_eq!(Ok(("c", "a")), p.parse("ac"));
+/// assert_eq!(("", "ab"), p.parse("ab").unwrap());
+/// assert_eq!(("c", "a"), p.parse("ac").unwrap());
 /// assert!(p.parse("neither").is_err());
 /// ```
 pub fn or<'a, Toks, T, A, P, Q>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
@@ -1765,9 +1817,9 @@ where
 ///
 /// let p = token('a').recover('_');
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
-/// assert_eq!(Ok(("", '_')), p.parse(""));
-/// assert_eq!(Ok(("b", '_')), p.parse("b"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert_eq!(("", '_'), p.parse("").unwrap());
+/// assert_eq!(("b", '_'), p.parse("b").unwrap());
 /// ```
 pub fn recover<'a, Toks, T, A, P>(p: P, value: A) -> impl Parser<'a, Toks, T, A>
 where
@@ -1794,9 +1846,9 @@ where
 ///
 /// let p = token('a').map(u32::from).recover_default();
 ///
-/// assert_eq!(Ok(("", 97)), p.parse("a"));
-/// assert_eq!(Ok(("", 0)), p.parse(""));
-/// assert_eq!(Ok(("b", 0)), p.parse("b"));
+/// assert_eq!(("", 97), p.parse("a").unwrap());
+/// assert_eq!(("", 0), p.parse("").unwrap());
+/// assert_eq!(("b", 0), p.parse("b").unwrap());
 /// ```
 pub fn recover_default<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, A>
 where
@@ -1821,9 +1873,9 @@ where
 ///
 /// let p = token('a').optional();
 ///
-/// assert_eq!(Ok(("", Some('a'))), p.parse("a"));
-/// assert_eq!(Ok(("", None)), p.parse(""));
-/// assert_eq!(Ok(("b", None)), p.parse("b"));
+/// assert_eq!(("", Some('a')), p.parse("a").unwrap());
+/// assert_eq!(("", None), p.parse("").unwrap());
+/// assert_eq!(("b", None), p.parse("b").unwrap());
 /// ```
 pub fn optional<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Option<A>>
 where
@@ -1862,7 +1914,7 @@ where
 /// // Parse an aribtrary sequence of ints, as long as they are *all* in ascending order.
 /// let p = any_token().mult().ensure(|ns| ns.is_sorted());
 ///
-/// assert_eq!(Ok((&nums1[5..], vec![1, 2, 3, 4, 5])), p.parse(nums1));
+/// assert_eq!((&nums1[5..], vec![1, 2, 3, 4, 5]), p.parse(nums1).unwrap());
 /// assert!(p.parse(nums2).is_err());
 /// ```
 pub fn ensure<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
@@ -1875,7 +1927,7 @@ where
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) if f(&x) => Ok((rest, x)),
-        _ => Err(ParseError::other("predicate of ensure failed", input)),
+        _ => Err(ParseError::no_parse("predicate of ensure failed", input)),
     }
 }
 
@@ -1903,7 +1955,7 @@ where
 /// // Parse an aribtrary sequence of ints, as long as they are *all* in ascending order.
 /// let p = any_token().mult().reject(|ns| ns.is_sorted());
 ///
-/// assert_eq!(Ok((&nums2[5..], vec![1, 2, 9, 4, 5])), p.parse(nums2));
+/// assert_eq!((&nums2[5..], vec![1, 2, 9, 4, 5]), p.parse(nums2).unwrap());
 /// assert!(p.parse(nums1).is_err());
 /// ```
 pub fn reject<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
@@ -1943,7 +1995,7 @@ where
 ///
 /// let p = token('a').plus(token('b').convert::<u32>());
 ///
-/// assert_eq!(Ok(("", ('a', 98))), p.parse("ab"));
+/// assert_eq!(("", ('a', 98)), p.parse("ab").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ba").is_err());
@@ -1991,7 +2043,7 @@ where
 ///
 /// let p = token('a').left(token('b').convert::<u32>());
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("ab"));
+/// assert_eq!(("", 'a'), p.parse("ab").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ba").is_err());
@@ -2035,7 +2087,7 @@ where
 ///
 /// let p = token('a').right(token('b').convert::<u32>());
 ///
-/// assert_eq!(Ok(("", 98)), p.parse("ab"));
+/// assert_eq!(("", 98), p.parse("ab").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ba").is_err());
@@ -2079,9 +2131,9 @@ where
 ///
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ab").is_err());
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("a", vec!['a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("a", vec!['a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn in_range<'a, Toks, T, A, P, R>(p: P, range: R) -> impl Parser<'a, Toks, T, Vec<A>>
 where
@@ -2112,7 +2164,7 @@ where
 
         // not possible to parse a correct number of values
         if max < min {
-            return Err(ParseError::other(
+            return Err(ParseError::no_parse(
                 &format!("impossible parser range: {}..={}", min, max),
                 input
             ));
@@ -2158,11 +2210,11 @@ where
 ///
 /// let p = token('a').mult();
 ///
-/// assert_eq!(Ok(("b", vec![])), p.parse("b"));
-/// assert_eq!(Ok(("b", vec!['a'])), p.parse("ab"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("b", vec![]), p.parse("b").unwrap());
+/// assert_eq!(("b", vec!['a']), p.parse("ab").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn mult<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Vec<A>>
 where
@@ -2193,10 +2245,10 @@ where
 /// let p = token('a').mult1();
 ///
 /// assert!(p.parse("b").is_err());
-/// assert_eq!(Ok(("b", vec!['a'])), p.parse("ab"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("b", vec!['a']), p.parse("ab").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn mult1<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Vec<A>>
 where
@@ -2227,8 +2279,8 @@ where
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ab").is_err());
 /// assert!(p.parse("aa").is_err());
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("a", vec!['a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("a", vec!['a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn exactly<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
@@ -2261,8 +2313,8 @@ where
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ab").is_err());
 /// assert!(p.parse("aa").is_err());
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn at_least<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
@@ -2289,11 +2341,11 @@ where
 ///
 /// let p = token('a').at_most(3);
 ///
-/// assert_eq!(Ok(("b", vec![])), p.parse("b"));
-/// assert_eq!(Ok(("b", vec!['a'])), p.parse("ab"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("a", vec!['a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("b", vec![]), p.parse("b").unwrap());
+/// assert_eq!(("b", vec!['a']), p.parse("ab").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("a", vec!['a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn at_most<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
@@ -2346,10 +2398,10 @@ where
 ///
 /// let p = token('a').sep_by(token(','));
 ///
-/// assert_eq!(Ok(("", vec!['a'])), p.parse("a"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("a,a"));
-/// assert_eq!(Ok((",", vec!['a', 'a'])), p.parse("a,a,"));
-/// assert_eq!(Ok((",b", vec!['a', 'a'])), p.parse("a,a,b"));
+/// assert_eq!(("", vec!['a']), p.parse("a").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("a,a").unwrap());
+/// assert_eq!((",", vec!['a', 'a']), p.parse("a,a,").unwrap());
+/// assert_eq!((",b", vec!['a', 'a']), p.parse("a,a,b").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse(",a").is_err());
 /// ```
@@ -2399,8 +2451,8 @@ where
 /// let surround = token_satisfies(|c: &char| c.is_whitespace()).mult1();
 /// let p = token('a').within(surround);
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse(" a "));
-/// assert_eq!(Ok(("", 'a')), p.parse(" \n  a  \r "));
+/// assert_eq!(("", 'a'), p.parse(" a ").unwrap());
+/// assert_eq!(("", 'a'), p.parse(" \n  a  \r ").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse(" a").is_err());
 /// assert!(p.parse("a ").is_err());
@@ -2440,8 +2492,8 @@ where
 ///
 /// let p = token('a').between(token('<'), token('>'));
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("<a>"));
-/// assert_eq!(Ok(("extra", 'a')), p.parse("<a>extra"));
+/// assert_eq!(("", 'a'), p.parse("<a>").unwrap());
+/// assert_eq!(("extra", 'a'), p.parse("<a>extra").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("<a").is_err());
 /// assert!(p.parse("a>").is_err());
@@ -2477,9 +2529,9 @@ where
 ///
 /// let p = any_token();
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
-/// assert_eq!(Ok(("cde", 'b')), p.parse("bcde"));
-/// assert_eq!(Ok(("しい日の誕生", '新')), p.parse("新しい日の誕生"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert_eq!(("cde", 'b'), p.parse("bcde").unwrap());
+/// assert_eq!(("しい日の誕生", '新'), p.parse("新しい日の誕生").unwrap());
 /// assert!(p.parse("").is_err());
 /// ```
 pub fn any_token<'a, Toks, T>() -> impl Parser<'a, Toks, T, T>
@@ -2509,8 +2561,8 @@ where
 ///
 /// let p = token_satisfies(is_vowel);
 ///
-/// assert_eq!(Ok(("bcd", 'a')), p.parse("abcd"));
-/// assert_eq!(Ok(("bcd", 'e')), p.parse("ebcd"));
+/// assert_eq!(("bcd", 'a'), p.parse("abcd").unwrap());
+/// assert_eq!(("bcd", 'e'), p.parse("ebcd").unwrap());
 /// assert!(p.parse("fbcd").is_err());
 /// assert!(p.parse("").is_err());
 /// ```
@@ -2533,8 +2585,8 @@ where
 ///
 /// let p = token('a');
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
-/// assert_eq!(Ok(("b", 'a')), p.parse("ab"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert_eq!(("b", 'a'), p.parse("ab").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse("ba").is_err());
 /// ```
@@ -2559,9 +2611,9 @@ where
 ///
 /// let p = string("foo");
 ///
-/// assert_eq!(Ok(("", "foo")), p.parse("foo"));
-/// assert_eq!(Ok(("d", "foo")), p.parse("food"));
-/// assert_eq!(Ok(("l", "foo")), p.parse("fool"));
+/// assert_eq!(("", "foo"), p.parse("foo").unwrap());
+/// assert_eq!(("d", "foo"), p.parse("food").unwrap());
+/// assert_eq!(("l", "foo"), p.parse("fool").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse("f").is_err());
 /// assert!(p.parse("fo").is_err());
@@ -2600,9 +2652,9 @@ pub fn string<'a>(target: &'a str) -> impl Parser<'a, &'a str, char, &'a str> {
 ///
 /// let p = span_string_char(is_vowel);
 ///
-/// assert_eq!(Ok(("bcd", "a")), p.parse("abcd"));
-/// assert_eq!(Ok(("", "aeiou")), p.parse("aeiou"));
-/// assert_eq!(Ok(("xaeiou", "")), p.parse("xaeiou"));
+/// assert_eq!(("bcd", "a"), p.parse("abcd").unwrap());
+/// assert_eq!(("", "aeiou"), p.parse("aeiou").unwrap());
+/// assert_eq!(("xaeiou", ""), p.parse("xaeiou").unwrap());
 /// ```
 pub fn span_string_char<'a, F>(f: F) -> impl Parser<'a, &'a str, char, &'a str>
 where
@@ -2641,10 +2693,10 @@ where
 ///
 /// let p = span_string_slice(|s| s.len() > 2);
 ///
-/// assert_eq!(Ok(("cd", "ab")), p.parse("abcd"));
-/// assert_eq!(Ok(("a", "")), p.parse("a"));
-/// assert_eq!(Ok(("", "")), p.parse(""));
-/// assert_eq!(Ok(("21", "9876543")), p.parse("987654321"));
+/// assert_eq!(("cd", "ab"), p.parse("abcd").unwrap());
+/// assert_eq!(("a", ""), p.parse("a").unwrap());
+/// assert_eq!(("", ""), p.parse("").unwrap());
+/// assert_eq!(("21", "9876543"), p.parse("987654321").unwrap());
 /// ```
 pub fn span_string_slice<'a, F>(f: F) -> impl Parser<'a, &'a str, char, &'a str>
 where
@@ -2685,9 +2737,9 @@ where
 /// // Will parse all tokens in `arr`.
 /// let p3 = span_slice(|n: &i32| *n > 0);
 ///
-/// assert_eq!(Ok((&nums[2..], &nums[0..2])), p1.parse(nums));
-/// assert_eq!(Ok((nums, &nums[0..0])), p2.parse(nums));
-/// assert_eq!(Ok((&nums[4..], nums)), p3.parse(nums));
+/// assert_eq!((&nums[2..], &nums[0..2]), p1.parse(nums).unwrap());
+/// assert_eq!((nums, &nums[0..0]), p2.parse(nums).unwrap());
+/// assert_eq!((&nums[4..], nums), p3.parse(nums).unwrap());
 /// ```
 pub fn span_slice<'a, T, F>(f: F) -> impl Parser<'a, &'a [T], T, &'a [T]>
 where
@@ -2849,16 +2901,17 @@ mod tests {
     );
 
     #[test]
-    fn test_set_error() {
-        // i am so mad i have to build the error manually
-        let p = token('a').set_error(|mut e| {
+    fn test_map_error() {
+        let p = token('a').map_error(|mut e| {
             e.set_details("couldn't find letter 'a'");
             e
         });
 
-        let expected = Err(ParseError::other("couldn't find letter 'a'", "b"));
-        assert_eq!(Ok(("", 'a')), p.parse("a"));
-        assert_eq!(expected, p.parse("b"));
+        let e = ParseError::no_parse("couldn't find letter 'a'", "b");
+        let expected = e.to_string();
+
+        assert_eq!(("", 'a'), p.parse("a").unwrap());
+        assert_eq!(expected, p.parse("b").unwrap_err().to_string());
     }
 
     p_test!(
@@ -2918,9 +2971,13 @@ mod tests {
     fn test_flunk_with() {
         let p = flunk_with::<&str, char, ()>("message");
 
-        assert_eq!(Err(ParseError::flunk("message", "")), p.parse(""));
-        assert_eq!(Err(ParseError::flunk("message", "foo")), p.parse("foo"));
-        assert_eq!(Err(ParseError::flunk("message", "anything")), p.parse("anything"));
+        let msg1 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "");
+        let msg2 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "foo");
+        let msg3 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "anything");
+
+        assert_eq!(msg1, p.parse("").unwrap_err().to_string());
+        assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
+        assert_eq!(msg3, p.parse("anything").unwrap_err().to_string());
     }
 
     p_test!(
