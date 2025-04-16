@@ -82,7 +82,7 @@
 //! fn custom_parser<'a>() -> impl Parser<'a, &'a [i32], i32, i32> {
 //!     |input: &'a [i32]| match input.iter().next() {
 //!         Some(x) if x % 2 == 0 => Ok((&input[1..], *x)),
-//!         _ => ParseError::other("no even int"),
+//!         _ => Err(ParseError::no_parse("no even int", input)),
 //!     }
 //! }
 //!
@@ -95,7 +95,7 @@
 //!
 //! let p = custom_parser();
 //!
-//! assert_eq!(Err(ParseError::Other("no even int".to_string())), p.parse(starts_with1));
+//! assert!(p.parse(starts_with1).is_err());
 //! assert_eq!(Ok((starts_with3, 2)), p.parse(starts_with2));
 //! ```
 //! Note the above example alludes to a quirk to do with the lifetimes of inputs.
@@ -354,35 +354,124 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ErrorType<Toks> {
+    EmptyInput,
+    UnexpectedInput {
+        loc: Toks,
+    },
+    Flunk {
+        loc: Toks,
+    },
+    NoParse {
+        loc: Toks,
+    },
+    NotEnough {
+        loc: Toks,
+        needed: usize,
+        got: usize,
+    },
+    Other {
+        loc: Toks,
+    },
+}
+
 /// The `Err` type of [`ParseResult`].
 ///
 /// And so it begins.
 #[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq)]
-pub enum ParseError<Toks, T> {
-    _phantom(PhantomData<T>),
-    EmptyInput,
-    UnexpectedInput(Toks),
-    //UnexpectedInput(Toks, PhantomData<T>),
-    Other(String),
+pub struct ParseError<Toks, T> {
+    error_type: ErrorType<Toks>,
+    details: Option<String>,
+    _phantom: PhantomData<T>,
 }
 
 impl<Toks, T> ParseError<Toks, T> {
-    pub fn empty_input<X>() -> Result<X, Self> {
-        Err(Self::EmptyInput)
+    pub fn empty_input() -> Self {
+        Self {
+            error_type: ErrorType::EmptyInput,
+            details: None,
+            _phantom: PhantomData,
+        }
     }
 
-    pub fn unexpected_input<X>(toks: Toks) -> Result<X, Self>
+    pub fn unexpected_input(loc: Toks) -> Self
     where
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        //Err(Self::UnexpectedInput(toks, PhantomData::default()))
-        Err(Self::UnexpectedInput(toks))
+        Self {
+            error_type: ErrorType::UnexpectedInput { loc },
+            details: None,
+            _phantom: PhantomData,
+        }
     }
 
-    pub fn other<X>(msg: &str) -> Result<X, Self> {
-        Err(Self::Other(msg.to_string()))
+    pub fn flunk(details: &str, loc: Toks) -> Self
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        Self {
+            error_type: ErrorType::Flunk { loc },
+            details: Some(details.to_owned()),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn no_parse(details: &str, loc: Toks) -> Self
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        Self {
+            error_type: ErrorType::NoParse { loc },
+            details: Some(details.to_owned()),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn not_enough(loc: Toks, needed: usize, got: usize) -> Self
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        Self {
+            error_type: ErrorType::NotEnough { loc, needed, got },
+            details: None, //Some(details.to_owned()),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn other(details: &str, loc: Toks) -> Self {
+        Self {
+            error_type: ErrorType::Other { loc },
+            details: Some(details.to_owned()),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn get_details(&self) -> Option<&str> {
+        self.details.as_deref()
+    }
+
+    pub fn set_details(&mut self, msg: &str) {
+        self.details = Some(msg.to_owned());
+    }
+
+    pub fn get_loc(&self) -> Option<Toks>
+    where
+        Toks: Clone + Copy,
+    {
+        match self.error_type {
+            ErrorType::EmptyInput => None,
+            ErrorType::UnexpectedInput { loc }
+            | ErrorType::Flunk { loc }
+            | ErrorType::NoParse { loc }
+            | ErrorType::NotEnough { loc, .. }
+            | ErrorType::Other { loc } => Some(loc),
+        }
     }
 }
 
@@ -392,9 +481,59 @@ where
     T: Clone + Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ParseError::_phantom(_) => {
-                panic!("you're not supposed to use this variant");
+        let details = match self.get_details() {
+            Some(d) => d,
+            None => "(no extra information available)",
+        };
+        match self.error_type {
+            ErrorType::EmptyInput => {
+                write!(f, "Parser was expecting more input, but there was none")
+            }
+            ErrorType::UnexpectedInput { loc } => {
+                write!(
+                    f,
+                    "Parser expected no more input, but found: {}",
+                    loc.preview()
+                )
+            }
+            ErrorType::Other { loc } => {
+                write!(
+                    f,
+                    "Parser was unsuccessful: {}, Failed at: {}",
+                    details,
+                    loc.preview()
+                )
+            }
+            ErrorType::Flunk { loc } => {
+                write!(
+                    f,
+                    "Parser flunked: {}, Flunked at: {}",
+                    details,
+                    loc.preview()
+                )
+            }
+            ErrorType::NoParse { loc } => {
+                write!(
+                    f,
+                    "Parsing was unsuccessful: {}, Failed at: {}",
+                    details,
+                    loc.preview()
+                )
+            }
+            ErrorType::NotEnough { loc, needed, got } => {
+                write!(
+                    f,
+                    "Parser needed to parse {} elements, but only parsed {}: {}, Failed at: {}",
+                    needed,
+                    got,
+                    details,
+                    loc.preview()
+                )
+            }
+        }
+        /*match self {
+            ParseError::_phantom_do_not_use_or_you_will_be_fired(_p, _v) => {
+                unreachable!("Display::fmt called for ParseError phantom variant, this should be impossible");
             }
             ParseError::EmptyInput => {
                 write!(f, "Parser was expecting more input, but it was empty")
@@ -407,10 +546,11 @@ where
                     toks.preview()
                 )
             }
-            ParseError::Other(message) => {
+            ParseError::Other(message, _loc) => {
                 write!(f, "Parsing was not successful: {}", message)
             }
         }
+        */
     }
 }
 
@@ -1001,7 +1141,7 @@ where
 /// {
 ///     match input.take_one() {
 ///         Some((rest, t)) => Ok((rest, t)),
-///         None => ParseError::other("no tokens")
+///         None => Err(ParseError::empty_input()),
 ///     }
 /// }
 ///
@@ -1012,8 +1152,17 @@ where
 ///     T: Clone + std::fmt::Debug + Eq + 'a,
 /// {
 ///     move |input: Toks| match input.take_one() {
-///         Some((rest, t)) if t == find => Ok((rest, t)),
-///         _ => ParseError::other("could not find specified token"),
+///         Some((rest, t)) => {
+///             if t == find {
+///                 Ok((rest, t))
+///             } else {
+///                 Err(ParseError::no_parse(
+///                     &format!("could not find token '{:?}'", find),
+///                     input
+///                 ))
+///             }
+///         }
+///         None => Err(ParseError::empty_input()),
 ///     }
 /// }
 ///
@@ -1236,14 +1385,17 @@ where
 /// use bad_parsers::{Parser, ParseError, token};
 ///
 /// let p1 = token('a');
-/// let p2 = token('a').set_error(|_| ParseError::Other("custom message".to_string()));
+/// let p2 = token('a').set_error(|mut e| {
+///     e.set_details("custom message");
+///     e
+/// });
 ///
 /// // Fails with default error message
 /// let msg1 = p1.parse("b").unwrap_err();
 /// // Fails with custom error message
 /// let msg2 = p2.parse("b").unwrap_err();
 ///
-/// assert_eq!(ParseError::other::<()>("custom message").unwrap_err(), msg2);
+/// assert_eq!(ParseError::other("custom message", "b"), msg2);
 /// assert_ne!(msg1, msg2);
 /// ```
 pub fn set_error<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
@@ -1299,7 +1451,7 @@ where
         if input.no_tokens() {
             Ok((input, ()))
         } else {
-            ParseError::unexpected_input(input)
+            Err(ParseError::unexpected_input(input))
         }
     }
 }
@@ -1321,15 +1473,15 @@ where
 ///
 /// let p = flunk::<&str, char, ()>();
 ///
-/// assert_eq!(ParseError::other("flunked parser"), p.parse(""));
-/// assert_eq!(ParseError::other("flunked parser"), p.parse("foo"));
+/// assert_eq!(ParseError::flunk("flunked parser", ""), p.parse("").unwrap_err());
+/// assert_eq!(ParseError::flunk("flunked parser", "foo"), p.parse("foo").unwrap_err());
 /// ```
 pub fn flunk<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
     T: Clone + Debug,
 {
-    |_| ParseError::other("flunked parser")
+    |input| Err(ParseError::flunk("flunked parser", input))
 }
 
 /// Creates a parser that always fails with a specified error.
@@ -1349,15 +1501,15 @@ where
 ///
 /// let p = flunk_with::<&str, char, ()>("custom message");
 ///
-/// assert_eq!(ParseError::other("custom message"), p.parse(""));
-/// assert_eq!(ParseError::other("custom message"), p.parse("foo"));
+/// assert_eq!(ParseError::flunk("custom message", ""), p.parse("").unwrap_err());
+/// assert_eq!(ParseError::flunk("custom message", "foo"), p.parse("foo").unwrap_err());
 /// ```
 pub fn flunk_with<'a, Toks, T, A>(message: &'a str) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
     T: Clone + Debug,
 {
-    move |_| ParseError::other(message)
+    move |input| Err(ParseError::flunk(message, input))
 }
 
 /// Creates a parser that always succeeds with the given value.
@@ -1723,7 +1875,7 @@ where
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) if f(&x) => Ok((rest, x)),
-        _ => ParseError::other("predicate of ensure failed"),
+        _ => Err(ParseError::other("predicate of ensure failed", input)),
     }
 }
 
@@ -1960,7 +2112,10 @@ where
 
         // not possible to parse a correct number of values
         if max < min {
-            return ParseError::other(&format!("impossible parser range: {}..={}", min, max));
+            return Err(ParseError::other(
+                &format!("impossible parser range: {}..={}", min, max),
+                input
+            ));
         }
 
         let mut values = vec![];
@@ -1978,11 +2133,7 @@ where
         }
 
         if values.len() < min {
-            ParseError::other(&format!(
-                "needed to parse {} elements, only got {}",
-                min,
-                values.len()
-            ))
+            Err(ParseError::not_enough(input, min, values.len()))
         } else {
             Ok((input, values))
         }
@@ -2337,7 +2488,7 @@ where
     T: Clone + Debug,
 {
     move |input: Toks| match input.take_one() {
-        None => ParseError::empty_input(),
+        None => Err(ParseError::empty_input()),
         Some((rest, t)) => Ok((rest, t)),
     }
 }
@@ -2419,7 +2570,10 @@ where
 pub fn string<'a>(target: &'a str) -> impl Parser<'a, &'a str, char, &'a str> {
     move |input: &'a str| match input.strip_prefix(target) {
         Some(rest) => Ok((rest, target)),
-        None => ParseError::other(&format!("could not parse string literal:{:?}", target)),
+        None => Err(ParseError::no_parse(
+            &format!("could not parse string literal:{:?}", target),
+            input
+        )),
     }
 }
 
@@ -2697,10 +2851,14 @@ mod tests {
     #[test]
     fn test_set_error() {
         // i am so mad i have to build the error manually
-        let p = token('a').set_error(|_| ParseError::Other("custom message".to_string()));
+        let p = token('a').set_error(|mut e| {
+            e.set_details("couldn't find letter 'a'");
+            e
+        });
 
+        let expected = Err(ParseError::other("couldn't find letter 'a'", "b"));
         assert_eq!(Ok(("", 'a')), p.parse("a"));
-        assert_eq!(ParseError::other("custom message"), p.parse("b"));
+        assert_eq!(expected, p.parse("b"));
     }
 
     p_test!(
@@ -2760,9 +2918,9 @@ mod tests {
     fn test_flunk_with() {
         let p = flunk_with::<&str, char, ()>("message");
 
-        assert_eq!(ParseError::other("message"), p.parse(""));
-        assert_eq!(ParseError::other("message"), p.parse("foo"));
-        assert_eq!(ParseError::other("message"), p.parse("anything"));
+        assert_eq!(Err(ParseError::flunk("message", "")), p.parse(""));
+        assert_eq!(Err(ParseError::flunk("message", "foo")), p.parse("foo"));
+        assert_eq!(Err(ParseError::flunk("message", "anything")), p.parse("anything"));
     }
 
     p_test!(
