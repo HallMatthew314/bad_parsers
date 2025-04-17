@@ -363,7 +363,6 @@ enum ErrorType<Toks> {
         loc: Toks,
     },
     Flunk {
-        #[doc(hidden)]
         loc: Toks,
     },
     NotEnough {
@@ -525,6 +524,29 @@ impl<Toks, T> ParseError<Toks, T> {
         }
     }
 }
+
+// Safety:
+// Data types across all variants of ErrorType<Toks>
+// * usize: Sync+Send
+// * Box<dyn Error>: Sync+Send implemented by Box<T>
+// * Toks: Sync+Send if enforced by trait bound
+// ErrorType<Toks> can implement Sync+Send IF: Toks: Sync+Send
+//
+// Composition of ParseError<Toks, T>
+// * error_type: ErrorType<Toks>: Send+Snc as established above
+// * details: String: Sync+Send
+// * _phantom: PhantomData<T>: Sync+Send IF T: Sync+Send
+// ParseError<Toks, T> can implement Sync+Send IF Toks: Sync+Send AND T: Sync+Send
+unsafe impl<Toks, T> Sync for ParseError<Toks, T>
+where
+    Toks: Sync,
+    T: Send,
+{}
+unsafe impl<Toks, T> Send for ParseError<Toks, T>
+where
+    Toks: Send,
+    T: Send,
+{}
 
 impl<Toks, T> fmt::Display for ParseError<Toks, T>
 where
