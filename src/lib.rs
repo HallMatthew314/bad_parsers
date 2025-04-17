@@ -515,6 +515,10 @@ impl<Toks, T> ParseError<Toks, T> {
     /// This variant is intended to be the generic failure type.
     /// When you need your parser to fail and you are unsure of which error type to use, you
     /// should probably use this one.
+    ///
+    /// Due to being the generic failure type, it is not able to provide much information on
+    /// its own.
+    /// As such, it is advisable to provide more details than normal when using this error type.
     pub fn no_parse(details: &str, loc: Toks) -> Self
     where
         Toks: Tokens<T>,
@@ -550,8 +554,9 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// This variant is intended to be used when parsing was not successful due to factors
     /// outside of the parsing chain, such as [I/O errors](std::io::Error).
-    /// A more robust system of forwarding arbitrary error types may be implemented in the
-    /// future.
+    /// A more robust system of forwarding arbitrary error types may be implemented ~~when the
+    /// Rust developers finally make up their minds on how error conversion with `?` is
+    /// supposed to work seriously it shouldn't be this hard~~ in the future.
     ///
     /// **REMINDER:** this error type is **not** the catch-all generic error type.
     /// If your parser simply fails to parse, but not for any of the reasons associated with
@@ -3069,6 +3074,105 @@ mod tests {
             assert!(!(&nums[..=i]).no_tokens());
         }
     }
+
+    #[test]
+    fn parse_error_get_set_details() {
+        let mut e = ParseError::<&str, char>::empty_input();
+        assert_eq!(None, e.get_details());
+
+        e.set_details("details1");
+        assert_eq!(Some("details1"), e.get_details());
+        e.set_details("details2");
+        assert_eq!(Some("details2"), e.get_details());
+    }
+
+    #[test]
+    fn parse_error_loc() {
+        let e = ParseError::<&str, char>::empty_input();
+        assert_eq!(None, e.get_loc());
+        assert_eq!(None, e.get_loc_non_empty());
+
+        let e = ParseError::no_parse("details", "");
+        assert_eq!(Some(""), e.get_loc());
+        assert_eq!(None, e.get_loc_non_empty());
+
+        let e = ParseError::no_parse("details", "input");
+        assert_eq!(Some("input"), e.get_loc());
+        assert_eq!(Some("input"), e.get_loc_non_empty());
+    }
+
+    fn make_io_error() -> Result<(), std::io::Error> {
+        std::fs::read("filethatdoesntexist").map(|_| ())
+    }
+
+    // In the future, god willing, the map_err can be replaced with just a question mark
+    fn fails_with_other(input: &str) -> ParseResult<&str, char, char> {
+        let _dummy = make_io_error().map_err(|e| ParseError::other(e, input))?;
+        Ok((input, 'a')) // <--- this shouldn't happen
+    }
+
+    #[test]
+    fn parse_error_caused_by_other() {
+        let inner = make_io_error().unwrap_err();
+        let e = ParseError::<&str, char>::other(inner, "input");
+        assert!(e.caused_by_other());
+
+        let e = ParseError::<&str, char>::empty_input();
+        assert!(!e.caused_by_other());
+    }
+
+    #[test]
+    fn parse_error_other_stops_recovery() {
+        macro_rules! run_test {
+            ($p:expr) => {
+                let p = $p;
+                let e = p.parse("input").unwrap_err();
+                assert!(e.caused_by_other());
+            };
+        }
+
+        run_test!(fails_with_other.at_least(0));
+        run_test!(fails_with_other.at_most(3));
+        run_test!(first_of![token('a'), fails_with_other, token('i')]);
+        run_test!(fails_with_other.in_range(0..3));
+        run_test!(fails_with_other.mult());
+        run_test!(token('i').or(fails_with_other).mult1());
+        run_test!(fails_with_other.optional());
+        run_test!(fails_with_other.or(token('i')));
+        run_test!(fails_with_other.recover('a'));
+        run_test!(fails_with_other.recover_default());
+        run_test!(token('i').sep_by(fails_with_other));
+
+        let p = fails_with_other;
+        let e = p.parse("input").unwrap_err();
+        assert!(e.get_details().is_none());
+        assert!(e.caused_by_other());
+        assert_eq!(Some("input"), e.get_loc());
+
+        let p = fails_with_other.map_error(|_| {
+            ParseError::no_parse("details that shouldn't be here", "different input")
+        });
+        let e = p.parse("input").unwrap_err();
+        assert!(e.get_details().is_none());
+        assert!(e.caused_by_other());
+        assert_eq!(Some("input"), e.get_loc());
+    }
+
+    /*
+    This is on ice until Rust finally settles on a way to convert between error types
+    that doesn't involve manually implementing From for every single error type in existence
+    fn fails_with_other_converts(input: &str) -> ParseResult<&str, char, char> {
+        let _dummy = make_io_error()?;
+        Ok((input, 'a')) // <--- this shouldn't happen
+    }
+
+    #[test]
+    fn parse_error_proper_error_behaviour() {
+        let p = fails_with_other_converts;
+
+        let e = p.parse("aaaa").unwrap_err();
+        assert!(e.caused_by_other());
+    }*/
 
     macro_rules! p_test {
         ($name:ident, $toks:ty, $a:ty, $p:expr, $good:expr, $bad:expr,) => {
