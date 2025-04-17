@@ -1,5 +1,4 @@
 //! # bad_parsers
-//!
 //! A parser combinator library written by myself for myself.
 //!
 //! Don't say I didn't warn you.
@@ -9,27 +8,22 @@
 //! The provided parsers are able to parse from string slices, arbitrary token type slices,
 //! as well as other token collections you may wish to implement yourself.
 //!
-//! In addition to these qulities, using this library in your own project is guaranteed to
+//! As an added bonus, using this library in your own project is guaranteed to
 //! make it worse! For free!
-//!
 //! ## Main Features
-//!
 //! * A [Parser trait](Parser) that primarily interfaces with functions and closures that act
 //!     like parsers, but could also be used to treat other types as parsers as well.
 //! * A [Tokens trait](Tokens) that allows things to be parsed out of
 //!     arbitrary data types.<sup>[citation needed]</sup>
-//! * Slightly-above the bare minimum of error handling: [`ParseResult`]s can provide one (1)
-//!     error message when parsing is unsuccessful.
+//! * Vaguely useful error handling: [`ParseError`]s can provide useful information when
+//!     parsing is unsuccessful.
 //! * [Lazily evaluated parsers](lazy) that allow for recursive definitions.
 //! * A collection of common parser combinator utility functions to build custom parsers with.
-//!
-//! ## Overview of how the parsers work
-//!
+//! ## Overview of Parsers
 //! The job of a parser is to extract meaningful data from a collection of tokens.
 //! To this end, a parser can be thought of as a function from some input tokens to some kind
 //! of data the parser is looking for.
 //! To achieve this, a parser will:
-//!
 //! * Examine the stream of tokens
 //! * Fail if it cannot find what it is looking for
 //! * If it does find it, return the parsed data *and* the remaining tokens
@@ -37,9 +31,7 @@
 //! The importance of returning the remaining tokens cannot be overstated, as this is what
 //! allows multiple simple parsers to be composed and chained together to create much more
 //! sophisticated parsers.
-//!
 //! ## [`Tokens`] and parser inputs
-//!
 //! As was already stated, parsers in this library are able to parse from arbitrary data
 //! types, as long as they implement the [`Tokens`] trait.
 //!
@@ -51,8 +43,8 @@
 //!
 //! More precise implementation guidelines for this trait are available in its documentation.
 //!
-//! All parsers accept a token container as their input to parse from and parsers being combined
-//! together must operate on *the same token container type*.
+//! All parsers accept a token container as their input to parse from. Additionally, parsers
+//! being combined together must operate on *the same token container type*.
 //!
 //! Currently, [`Tokens`] is only implemented OOTB by [`&str`] and [`&[T]`](slice).
 //! In practice, these should be the only input types you would need to deal with.
@@ -61,9 +53,7 @@
 //! well as collections of arbitrary token types.
 //! This means that for applications such as parsing a programming language, the combinator
 //! framework can be used for both lexing **and** parsing.
-//!
 //! ## Creating parsers
-//!
 //! All parsers implement the trait [`Parser<'a, Toks, T, A>`](Parser).
 //! The type arguments are as follows:
 //!
@@ -108,7 +98,23 @@
 //! Most of the provided combinator functions in this library will accept generic parser types.
 //! However, some will require a [`BoxedParser`].
 //! The most notable examples are the operator overloads for [`BoxedParser`].
+//! ## Error Handling
+//! When a parser fails, it returns an `Err` containing an error value of type
+//! [`ParseError<Toks, T>`].
+//! When implementing your own parsers, it is important to construct error values that
+//! accurately reflect the cause of the error.
 //!
+//! If you see a constructor function in [`ParseError`] that describes the reason that your
+//! parse has failed, such as [`ParseError::empty_input`] or [`ParseError::not_enough`],
+//! you should probably use that one.
+//! If some kind of fault occurs with a process that is not strictly a parser failure, such as
+//! an I/O operation failure or an overflow, you should use the [`ParseError::other`]
+//! constructor, which wraps an arbitrary error type from another process and behaves slightly
+//! differently in order to report the error correctly.
+//! When in doubt, the [`ParseError::no_parse`] constructor is the catch-all generic error type.
+//! Be sure to provide useful details when constructing this error type.
+//!
+//! More detailed information can be found in the [`ParseError` documentation](ParseError).
 //! ## Worked Example: Parsing an Integer
 //!
 //! Suppose we want to find an integer at the start of a string.
@@ -207,11 +213,60 @@
 //! assert!(front_number.parse("").is_err());
 //! ```
 //! Success! We now have a parser that can extract an integer from the start of a string.
-//! With that being said, we could make this more friendly for other programmers who want to use
-//! this cutting-edge integer parsing technology.
-//! A programmer who is just trying to parse an integer doesn't really need to worry about the
-//! remaining input, but our parser still returns it.
-//! Let's put this parser in an easier-to-use function:
+//!
+//! There is a caveat with this parser, however: we haven't specified any custom error messages.
+//! If we leave this parser with just the default errors to report, we probably won't get a lot
+//! of useful information as to *why* the parser failed.
+//!
+//! Since our parser has been put together from various combinators, the best way to change
+//! the error value is to use the [`map_error`] function.
+//! This function works in a way similar to [`Result::map_err`] and allows for modification of
+//! the error value that the parser was going to return.
+//!
+//! For our parser, the [`token_satisfies`] can fail if it doesn't find a digit, but as long
+//! as it finds at least one, then the parser should still succeed.
+//! We only have that pesky zero-digit case to worry about, so we can add a helpful error
+//! message onto our [`mult1`] for when it can't find any digits:
+//! ```
+//! use bad_parsers::{Parser, token_satisfies};
+//!
+//! let front_number = token_satisfies(char::is_ascii_digit)
+//!     .map(|c| c.to_digit(10).unwrap())
+//!     .mult1()
+//!     .map_error(|mut e| {
+//!         e.set_details("front_number couldn't find any digits");
+//!         e
+//!     })
+//!     .map(|digs| {
+//!         let mut n = 0;
+//!         for d in digs {
+//!             n *= 10;
+//!             n += d;
+//!         }
+//!         n
+//!     });
+//!
+//! assert_eq!(("", 123), front_number.parse("123").unwrap());
+//!
+//! let expected = "Parser needed to parse 1 elements, but only parsed 0: front_number couldn't find any digits, Failed at: \"foo\"";
+//! assert_eq!(expected.to_string(), front_number.parse("foo").unwrap_err().to_string());
+//! ```
+//! Now that we've modified the details of the original [`ParseError`], the parser's error
+//! message clarifies that it was looking for digits, but couldn't find any.
+//! If this parser were part of a much larger chain, we could narrow down our search for the
+//! problem to parsers that look for digits.
+//! In this situation, we can see that the original error from [`mult1`] already stated that it
+//! was looking for at least one of something, as well as the part of the input where it failed.
+//!
+//! I must say, this is a pretty good-looking parser!
+//!
+//! With that being said, having to deal with the complex type of the parser and its result
+//! can be a bit clunky for more casual developers who want to use this cutting-edge integer
+//! parsing technology.
+//! If the user is just trying to parse an integer and doesn't really care about the
+//! remaining input or any error messages, then using the parser in multiple places could very
+//! quickly make the code tedious and noisy with all the [`Result`] unwrapping.
+//! We can deal with all of that by placing this parser in an easier-to-use function:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
 //!
@@ -219,6 +274,10 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
+//!         .map_error(|mut e| {
+//!             e.set_details("front_number couldn't find any digits");
+//!             e
+//!         })
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -227,10 +286,7 @@
 //!             }
 //!             n
 //!         });
-//!     match p.parse(input) {
-//!         Ok((_, n)) => Some(n),
-//!         Err(_)     => None,
-//!     }
+//!     p.parse(input).ok().map(|(_input, n)| n)
 //! }
 //!
 //! assert_eq!(Some(123), parse_int("123"));
@@ -239,25 +295,28 @@
 //! assert!(parse_int("no front number").is_none());
 //! assert!(parse_int("").is_none());
 //! ```
-//! This works well enough, but is it *really* correct?
+//! This works well enough, but giving it some more thought, is the parser *really* correct?
 //! If an input string starts with an integer, but contains some more text after it, should it
 //! still be considered valid?
 //!
 //! Perhaps, perhaps not.
 //! But just for fun, let's modify this function to *only* return an integer when the string
 //! contains no extra text.
-//! We can do this with two more combinators.
 //! To check that there is no text left after the integer, we can use [`eof`].
 //! This special parser will succeed with a [`()`](unit) only if the input is empty.
 //! But to make it work together with our integer parser, we'll need to combine them together
 //! with [`plus`]:
 //! ```
-//! use bad_parsers::{Parser, eof, token_satisfies};
+//! use bad_parsers::{Parser, token_satisfies, eof};
 //!
 //! fn parse_int(input: &str) -> Option<u32> {
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
+//!         .map_error(|mut e| {
+//!             e.set_details("front_number couldn't find any digits");
+//!             e
+//!         })
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -267,10 +326,7 @@
 //!             n
 //!         })
 //!         .plus(eof());
-//!     match p.parse(input) {
-//!         Ok((_, (n, ()))) => Some(n),
-//!         Err(_)           => None,
-//!     }
+//!     p.parse(input).ok().map(|(_input, (n, ()))| n)
 //! }
 //!
 //! assert_eq!(Some(123), parse_int("123"));
@@ -279,22 +335,27 @@
 //! assert!(parse_int("no front number").is_none());
 //! assert!(parse_int("").is_none());
 //! ```
-//! Now only the first input is parsed successfully, as the two after it have trailing text.
+//! Now only the first input in our tests is parsed successfully, as the two after it have
+//! trailing text.
 //!
-//! Also note that the returned value has changed types f-rom [`u32`] to [`(u32, ())`](tuple).
-//! This is due to the use of `plus`, which will run two parsers in sequence, and return the
-//! values of both when they both succeed, and fail completely unless both parsers succeed.
+//! Also note that the returned value has changed types from [`u32`] to [`(u32, ())`](tuple).
+//! This is due to the use of `plus`, which runs two parsers in sequence, and return the
+//! values of both when they both succeed, but will fail completely unless both parsers succeed.
 //!
-//! Of course, in this situation we only care about the first value being returned, so we can
-//! replace [`plus`] with a variant called [`left`], which works the same as [`plus`] but only
-//! returns the first value:
+//! Since we only care about the first value being returned in this situation, we can replace
+//! [`plus`] with a variant called [`left`], which works the same as [`plus`] but only returns
+//! the first value.
 //! ```
-//! use bad_parsers::{Parser, eof, token_satisfies};
+//! use bad_parsers::{Parser, token_satisfies, eof};
 //!
 //! fn parse_int(input: &str) -> Option<u32> {
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
+//!         .map_error(|mut e| {
+//!             e.set_details("front_number couldn't find any digits");
+//!             e
+//!         })
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -304,10 +365,7 @@
 //!             n
 //!         })
 //!         .left(eof());
-//!     match p.parse(input) {
-//!         Ok((_, n)) => Some(n),
-//!         Err(_)     => None,
-//!     }
+//!     p.parse(input).ok().map(|(_input, n)| n)
 //! }
 //!
 //! assert_eq!(Some(123), parse_int("123"));
@@ -324,25 +382,8 @@
 //! I really ought to submit this feature to the Rust development team.
 //! The standard library could really make use of this-
 //! ```
-//! # use bad_parsers::{Parser, eof, token_satisfies};
-//! # fn parse_int(input: &str) -> Option<u32> {
-//! #     let p = token_satisfies(char::is_ascii_digit)
-//! #         .map(|c| c.to_digit(10).unwrap())
-//! #         .mult1()
-//! #         .map(|digs| {
-//! #             let mut n = 0;
-//! #             for d in digs {
-//! #                 n *= 10;
-//! #                 n += d;
-//! #             }
-//! #             n
-//! #         })
-//! #         .left(eof());
-//! #     match p.parse(input) {
-//! #        Ok((_, n)) => Some(n),
-//! #        Err(_)     => None,
-//! #    }
-//! # }
+//! # // do you really need to see it working again?
+//! # fn parse_int(_input: &str) -> Option<u32> { Some(123) }
 //! let x: u32 = parse_int("123").unwrap();
 //!
 //! let y: u32 = str::parse("123").unwrap();
