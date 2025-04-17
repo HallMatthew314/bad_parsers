@@ -576,7 +576,10 @@ impl<Toks, T> ParseError<Toks, T> {
     /// * [`sep_by`]
     pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
         Self {
-            error_type: ErrorType::Other { cause: Box::new(cause), loc },
+            error_type: ErrorType::Other {
+                cause: Box::new(cause),
+                loc,
+            },
             details: None,
             _phantom: PhantomData,
         }
@@ -647,10 +650,7 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// See also: [`Parser::map_error`].
     pub fn caused_by_other(&self) -> bool {
-        match self.error_type {
-            ErrorType::Other { .. } => true,
-            _ => false,
-        }
+        matches!(self.error_type, ErrorType::Other { .. })
     }
 }
 
@@ -670,12 +670,14 @@ unsafe impl<Toks, T> Sync for ParseError<Toks, T>
 where
     Toks: Sync,
     T: Send,
-{}
+{
+}
 unsafe impl<Toks, T> Send for ParseError<Toks, T>
 where
     Toks: Send,
     T: Send,
-{}
+{
+}
 
 impl<Toks, T> fmt::Display for ParseError<Toks, T>
 where
@@ -683,10 +685,10 @@ where
     T: Clone + Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let details = match self.get_details() {
-            Some(d) => d,
-            None => "(no extra information available)",
-        };
+        let details = self
+            .get_details()
+            .unwrap_or("(no extra information available)");
+
         match self.error_type {
             ErrorType::EmptyInput => {
                 write!(f, "Parser was expecting more input, but there was none")
@@ -2380,7 +2382,7 @@ where
         if max < min {
             return Err(ParseError::no_parse(
                 &format!("impossible parser range: {}..={}", min, max),
-                input
+                input,
             ));
         }
 
@@ -2687,7 +2689,7 @@ where
                         items.push(x);
                         input = next_input;
                     }
-                }
+                },
             }
         }
         Ok((input, items))
@@ -2885,7 +2887,7 @@ pub fn string<'a>(target: &'a str) -> impl Parser<'a, &'a str, char, &'a str> {
         Some(rest) => Ok((rest, target)),
         None => Err(ParseError::no_parse(
             &format!("could not parse string literal:{:?}", target),
-            input
+            input,
         )),
     }
 }
@@ -3235,7 +3237,10 @@ mod tests {
 
         let msg1 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "");
         let msg2 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "foo");
-        let msg3 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "anything");
+        let msg3 = format!(
+            "Parser flunked: {}, Flunked at: \"{}\"",
+            "message", "anything"
+        );
 
         assert_eq!(msg1, p.parse("").unwrap_err().to_string());
         assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
