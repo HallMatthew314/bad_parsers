@@ -26,21 +26,22 @@
 //! ## Overview of how the parsers work
 //!
 //! The job of a parser is to extract meaningful data from a collection of tokens.
-//! To this end, a parser can be thought of as a function from some input tokens to some kind of
-//! data the parser is looking for.
+//! To this end, a parser can be thought of as a function from some input tokens to some kind
+//! of data the parser is looking for.
 //! To achieve this, a parser will:
 //!
 //! * Examine the stream of tokens
 //! * Fail if it cannot find what it is looking for
 //! * If it does find it, return the parsed data *and* the remaining tokens
 //!
-//! The importance of returning the remaining tokens cannot be overstated, as this is what allows
-//! multiple simple parsers to be composed and chained together to create much more sophisticated parsers.
+//! The importance of returning the remaining tokens cannot be overstated, as this is what
+//! allows multiple simple parsers to be composed and chained together to create much more
+//! sophisticated parsers.
 //!
 //! ## [`Tokens`] and parser inputs
 //!
-//! As was already stated, parsers in this library are able to parse from arbitrary data types, as
-//! long as they implement the [`Tokens`] trait.
+//! As was already stated, parsers in this library are able to parse from arbitrary data
+//! types, as long as they implement the [`Tokens`] trait.
 //!
 //! Implementors of this trait are thought of as containers of individual tokens.
 //! In general, a type may implement [`Tokens<T>`] if:
@@ -136,10 +137,11 @@
 //!
 //! A good first step, but we need to parse multiple digits.
 //! For a task like this, `bad_parsers` provides the [`mult1`] combinator.
-//! This takes a parser, and runs it multiple times over the input and collects the results in a
-//! [`Vec`].
+//! This takes a parser, and runs it multiple times over the input and collects the results in
+//! a [`Vec`].
 //! This new parser will keep collecting parsed values until it is unable to parse any more.
-//! This parser will also fail if it is unable to parse at least one item from the input, hence the
+//! This parser will also fail if it is unable to parse at least one item from the input,
+//! hence the
 //! name:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
@@ -157,11 +159,11 @@
 //!
 //! We are now able to get all the digits from the start of a string.
 //! Unfortunately, a [`Vec<char>`] is not an integer that Rust can do arithmetic with.
-//! There are a few ways we could turn it into an integer, so I'm going to choose one of the more
-//! convoluted solutions to show off more of the library.
+//! There are a few ways we could turn it into an integer, so I'm going to choose one of the
+//! more convoluted solutions to show off more of the library.
 //! We'll be using the [`map`] combinator to turn the digit characters into integers.
-//! Note that the [`map`] is added *before* the [`mult1`], as we only want to work with one digit
-//! at a time for the moment:
+//! Note that the [`map`] is added *before* the [`mult1`], as we only want to work with one
+//! digitat a time for the moment:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
 //!
@@ -247,8 +249,8 @@
 //! We can do this with two more combinators.
 //! To check that there is no text left after the integer, we can use [`eof`].
 //! This special parser will succeed with a [`()`](unit) only if the input is empty.
-//! But to make it work together with our integer parser, we'll need to combine them together with
-//! [`plus`]:
+//! But to make it work together with our integer parser, we'll need to combine them together
+//! with [`plus`]:
 //! ```
 //! use bad_parsers::{Parser, eof, token_satisfies};
 //!
@@ -280,12 +282,12 @@
 //! Now only the first input is parsed successfully, as the two after it have trailing text.
 //!
 //! Also note that the returned value has changed types f-rom [`u32`] to [`(u32, ())`](tuple).
-//! This is due to the use of `plus`, which will run two parsers in sequence, and return the values
-//! of both when they both succeed, and fail completely unless both parsers succeed.
+//! This is due to the use of `plus`, which will run two parsers in sequence, and return the
+//! values of both when they both succeed, and fail completely unless both parsers succeed.
 //!
 //! Of course, in this situation we only care about the first value being returned, so we can
-//! replace [`plus`] with a variant called [`left`], which works the same as [`plus`] but only returns
-//! the first value:
+//! replace [`plus`] with a variant called [`left`], which works the same as [`plus`] but only
+//! returns the first value:
 //! ```
 //! use bad_parsers::{Parser, eof, token_satisfies};
 //!
@@ -393,8 +395,32 @@ enum ErrorType<Toks> {
 /// to the number of parsed elements, while [`ParseError::empty_input`] requires no extra
 /// information at all.
 /// The two most common values to give a constructor are:
-/// * a `&str` providing extra human-readable information about this specific failure
-/// * a `Toks` providing the input that the parser failed to parse from
+/// * `details`: a `&str` providing extra human-readable information about this specific failure
+/// * `loc` a `Toks` providing the input that the parser failed to parse from
+///
+/// When providing `details`, the information should be relevant to the specific parser in
+/// your parser chain.
+/// For example, if a parser looking for a single digit is just a wrapped around
+/// [`token_satisfies`], and the error message is not modified, the parser will return a
+/// generic error message that a predicate failed.
+///
+/// Example of providing a useful message via [`map_error`]:
+/// ```
+/// use bad_parsers::{Parser, ParseError, Tokens, token_satisfies};
+///
+/// let digit = token_satisfies(char::is_ascii_digit)
+///     .map_error(|e: ParseError<&str, char>| {
+///         if let Some(input) = e.get_loc_non_empty() {
+///             let c = input.take_one().unwrap().1;
+///             ParseError::no_parse(
+///                 &format!("expected a digit, but found: {:?}", c),
+///                 input,
+///             )
+///         } else {
+///             ParseError::empty_input()
+///         }
+///     });
+/// ```
 #[derive(Debug)]
 pub struct ParseError<Toks, T> {
     error_type: ErrorType<Toks>,
@@ -510,6 +536,14 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// Not all error types are able to provide a meaningful input state to report, hence why
     /// this function returns an [`Option`].
+    ///
+    /// **Caution:** the above statement implies that if this error *does* contain an input
+    /// state, then the input should also be non-empty.
+    /// However, this should not be assumed to always be true, and this method makes no such
+    /// guarantee.
+    ///
+    /// If your error reporting requires a non-empty input to refer to, consider using
+    /// [`ParseError::get_loc_non_empty`] instead.
     pub fn get_loc(&self) -> Option<Toks>
     where
         Toks: Clone + Copy,
@@ -521,6 +555,41 @@ impl<Toks, T> ParseError<Toks, T> {
             | ErrorType::NoParse { loc }
             | ErrorType::NotEnough { loc, .. }
             | ErrorType::Other { loc, .. } => Some(loc),
+        }
+    }
+
+    /// Returns the non-empty input that was unable to be parsed from.
+    ///
+    /// Not all error types are able to provide a meaningful input state to report, hence why
+    /// this function returns an [`Option`].
+    ///
+    /// The input states returned by this method are guaranteed to be non-empty.
+    ///
+    /// If your error reporting does not require the input to be non-empty, you may wish to use
+    /// [`ParseError::get_loc`] instead.
+    pub fn get_loc_non_empty(&self) -> Option<Toks>
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        match self.get_loc() {
+            Some(loc) if !loc.no_tokens() => Some(loc),
+            _ => None,
+        }
+    }
+
+    /// Returns whether or not this error was caused by another (non-parsing related) error.
+    ///
+    /// If this returns `true`, a parser should not attempt to recover from this error.
+    /// This is because the parsing will have failed not due to parser failure, but by being
+    /// interrupted by another class of error that should be handled
+    /// outside of the parser chain.
+    ///
+    /// See also: [`Parser::map_error`].
+    pub fn caused_by_other(&self) -> bool {
+        match self.error_type {
+            ErrorType::Other { .. } => true,
+            _ => false,
         }
     }
 }
@@ -633,7 +702,7 @@ pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 ///
 /// ## How to implement this trait
 ///
-/// Don't. Just convert whatever you need to parse from into a slice and you're good to go.
+/// Don't. Just convert whatever input you need to parse into a slice and you're good to go.
 ///
 /// ### But I wanna!
 ///
@@ -657,13 +726,15 @@ pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 ///
 /// ## Why do we need `T: Clone`?
 ///
-/// The `T: Clone` constraint is required for us to work with inputs immutably.
+/// The `T: Clone` constraint is required to ensure that we can work with inputs immutably.
 /// This is mandated by this library because parsers may be tasked with operating on the same
 /// inputs, which could cause parsers to consume input that others may need access to.
 ///
 /// For example, consider two parsers that operate on [`&str`].
-/// The first parser is looking for the word `"food"`, and the other is looking for the word `"fool"`.
-/// Suppose that both parsers are implemented by checking each character in the input one at a time:
+/// The first parser is looking for the word `"food"`, and the other is looking for the
+/// word `"fool"`.
+/// Suppose that both parsers are implemented by checking each character in the input one at
+/// a time:
 /// ```txt
 /// invoking food_p.parse("food"):
 ///
@@ -687,7 +758,8 @@ pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 ///
 /// results for these inputs with the fool_p parser are left as an exercise for the reader
 /// ```
-/// Now suppose we combine these two parsers into a parser that tries to parse `"food"` *or* `"fool"`, in that order.
+/// Now suppose we combine these two parsers into a parser that tries to parse `"food"`
+/// *or* `"fool"`, in that order.
 /// Remember that in these hypotheticals, the input data is being mutated:
 /// ```txt
 /// food_or_fool = food_p.or(fool_p)
@@ -719,8 +791,8 @@ pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 /// 'f' - err     | "l"
 /// failed        | "l"
 /// ```
-/// Even though the input should have been parsed by the parser that was looking for `"fool"`, the
-/// modification of the input took away the data that it was looking for.
+/// Even though the input should have been parsed by the parser that was looking for `"fool"`,
+/// the modification of the input took away the data that it was looking for.
 ///
 /// This problem is resolved when the sub-parsers are given the same starting inputs:
 /// ```txt
@@ -741,8 +813,9 @@ pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 /// success (fool) | ""
 /// ```
 /// Some other parser combinator libraries (such as Haskell's
-/// [Parsec](https://hackage.haskell.org/package/parsec)) fix this issue by requiring the programmer
-/// to explicitly mark where the input should be preserved in the event of parser failure.
+/// [Parsec](https://hackage.haskell.org/package/parsec)) fix this issue by requiring the
+/// programmer to explicitly mark where the input should be preserved in the event of
+/// parser failure.
 /// This library instead opts to *always* preserve the input for the convienience of the
 /// programmer, at the cost of not being as performant.
 /// If your project cannot afford to take this performance hit,
@@ -754,8 +827,8 @@ where
 {
     /// Attempts to take a single token from the collection.
     ///
-    /// When implementing this trait, this method *must not* mutate `self`, as other parsers rely
-    /// on token data remaining unmodified between parsers.
+    /// When implementing this trait, this method *must not* mutate `self`, as other parsers
+    /// rely on token data remaining unmodified between parsers.
     /// To get a better idea of what your implementation of this method should look like, you may
     /// refer to the [`&str`](#impl-Tokens<char>-for-%26str) and
     /// [`&[T]`](#impl-Tokens<T>-for-%26[T]) implementations.
@@ -1371,13 +1444,21 @@ where
 /// As such, the parser created from this macro will attempt to parse the input with each
 /// [`Parser`] it was provided with, *in the order they were given*.
 /// The first time a parser succeeds, this parser will return that result.
-/// If none of the parsers succeed, then this parser will fail. Currently this parser does not
-/// provide an error implying it was created from this macro, though this is subject to change.
+/// If none of the parsers succeed, then this parser will fail.
+/// Currently this parser does not specifically provide an error implying it was created from
+/// this macro, though this is subject to change.
+///
+/// **Note:** if any of the provided parsers produce an error value created with the
+/// [`ParseError::other`] function before any of the parsers are successful, this parser will
+/// *not* attempt to parse with the remaining parsers and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// This macro requires at least two parser arguments to be invoked. This restriction exists
 /// partly for type-checking reasons, but primarily becuase trying to use this macro with
 /// less than two parsers would be unusual, and it is unclear what kind of parser the macro
-/// should produce in such a situation.
+/// should even produce in such a situation.
 ///
 /// It also gave me a name error while I was testing the single-parser case, which as far as
 /// I'm concerned is a capital offense.
@@ -1411,7 +1492,8 @@ macro_rules! first_of {
 ///
 /// Using parsers lazily can sometimes improve performance, but the primary reason this function
 /// exists is to allow for parsers with recursive definitions.
-/// Without lazy evaluation, attempting to recursively define a parser will cause an infinite loop.
+/// Without lazy evaluation, attempting to recursively define a parser will cause an
+/// infinite loop.
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, BoxedParser, lazy, token};
@@ -1443,10 +1525,18 @@ where
     move |input| f().parse(input)
 }
 
-// Docs on this function are purposefully unhelpful as error handling
-// is going to be overhauled at some point.
-/// Changes the given parser's error message with the provided function.
+/// Changes the given parser's error value with the provided function.
 ///
+/// This function provides another option for modifying the error values of failed parsers, as
+/// using a function like this may be more convinient than manually matching against
+/// [`ParseResult`]s.
+///
+/// **Note:** this function explicitly prohibits the modification/replacement of error values
+/// created with the [`ParseError::other`] function, as such errors were caused by factors
+/// outside of the parser chain. However, this function does not prohibit the creation of
+/// such error values.
+///
+/// See also: [`ParseError`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, ParseError, token};
@@ -1474,7 +1564,16 @@ where
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(ParseError<Toks, T>) -> ParseError<Toks, T> + 'a,
 {
-    move |input| p.parse(input).map_err(&f)
+    let map_f = move |e: ParseError<Toks, T>| {
+        // If this error was caused by an external error,
+        // do not allow the user-provided function to modify it.
+        if e.caused_by_other() {
+            e
+        } else {
+            f(e)
+        }
+    };
+    move |input| p.parse(input).map_err(&map_f)
 }
 
 /// Creates a parser that always succeeds and performs no meaningful operations.
@@ -1576,7 +1675,6 @@ where
 /// let msg2 = format!("Parser flunked: custom message, Flunked at: \"foo\"");
 /// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
 /// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
-
 /// ```
 pub fn flunk_with<'a, Toks, T, A>(message: &'a str) -> impl Parser<'a, Toks, T, A>
 where
@@ -1790,6 +1888,12 @@ where
 /// If `p` fails, the parser will attempt to parse the same input with `q` and return whatever
 /// the result of that is, success or fail.
 ///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* attempt to parse with `q`.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// When called directly, `p` will be used first and `q` second.
 /// When called as a [method of `Parser`](Parser::or), the receiving parser (the `self`) is
 /// used first and the `other` parser is used second.
@@ -1818,6 +1922,7 @@ where
     Q: Parser<'a, Toks, T, A> + 'a,
 {
     move |input| match p.parse(input) {
+        Err(e) if e.caused_by_other() => Err(e),
         Err(_) => q.parse(input),
         ok => ok,
     }
@@ -1828,6 +1933,12 @@ where
 /// When `p` succeeds, the parser behaves as normal.
 /// When `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
 /// returns `value`.
+///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return the provided value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// `A` is required to implement [`Clone`] because the parser can run multiple times and will
 /// need to produce the same value on each failed parse.
@@ -1859,6 +1970,12 @@ where
 /// When `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
 /// returns the result of `A::default`.
 ///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return a default value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// Naturally, `A` must implement [`Default`] to generate a default value.
 ///
 /// See also: [`optional`], [`recover`].
@@ -1884,9 +2001,15 @@ where
 
 /// Wraps the return value in an `Option`, allows parsing to continue on failure.
 ///
-/// If `p` succeeds, the parser returns the value it normally would within a [`Some`].
+/// If `p` succeeds, the parser returns the value it normally would within a `Some`.
 /// If `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
-/// returns a [`None`].
+/// returns a `None`.
+///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return a `None` value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// See also: [`recover`], [`recover_default`].
 /// ## Examples
@@ -1908,6 +2031,7 @@ where
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) => Ok((rest, Some(x))),
+        Err(e) if e.caused_by_other() => Err(e),
         Err(_) => Ok((input, None)),
     }
 }
@@ -1949,7 +2073,8 @@ where
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) if f(&x) => Ok((rest, x)),
-        _ => Err(ParseError::no_parse("predicate of ensure failed", input)),
+        Ok(_) => Err(ParseError::no_parse("predicate of ensure failed", input)),
+        Err(e) => Err(e),
     }
 }
 
@@ -2135,6 +2260,13 @@ where
 /// If `p` parses up to the upper limit of the range, this parser will stop parsing and return
 /// all of the parsed items.
 ///
+/// **Note:** if `p` has already parsed the minimum number of elements, but then produces an
+/// error value created with the [`ParseError::other`] function, this parser will *not* return
+/// the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// Ranges can be specified with range literals, as well as any other type that implements
 /// [`RangeBounds<usize>`].
 /// As such, it will also act appropriately with range bounds that cannot normally be expressed
@@ -2196,6 +2328,9 @@ where
 
         while values.len() < max {
             match p.parse(input) {
+                Err(e) if e.caused_by_other() => {
+                    return Err(e);
+                }
                 Err(_) => {
                     break;
                 }
@@ -2221,6 +2356,12 @@ where
 /// This parser will continue parsing with `p` until `p` fails, potentially consuming all of the
 /// input if `p` never fails.
 /// If `p` is unable to parse any elements, this parser will return an empty [`Vec<A>`].
+///
+/// **Note:** if `p` produces an error value created with the [`ParseError::other`] function,
+/// this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// **WARNING:** if `p` is able to successfully parse things *without consuming any input*,
 /// then running this parser may create an infinite loop.
@@ -2255,6 +2396,13 @@ where
 /// This parser will continue parsing with `p` until `p` fails, potentially consuming all of the
 /// input if `p` never fails.
 /// If `p` is unable to parse any elements, this parser will fail.
+///
+/// **Note:** if `p` has already parsed an element, but then produces an error value created
+/// with the [`ParseError::other`] function, this parser will *not* return the already-parsed
+/// elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// **WARNING:** if `p` is able to successfully parse things *without consuming any input*,
 /// then running this parser may create an infinite loop.
@@ -2322,6 +2470,13 @@ where
 /// input if `p` never fails.
 /// If `p` is unable to parse a minimum of `n` elements, this parser will fail.
 ///
+/// **Note:** if `p` has already parsed the minimum number of elements, but then produces an
+/// error value created with the [`ParseError::other`] function, this parser will *not* return
+/// the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// **WARNING:** if `p` is able to successfully parse things *without consuming any input*,
 /// then running this parser may create an infinite loop.
 ///
@@ -2353,8 +2508,14 @@ where
 /// This combinator behaves identically to `in_range(p, ..=n)`.
 ///
 /// This parser will repeatedly parse with `p` until it has parsed exactly `n` items.
-/// If `p` is not able to parse enough items, this parser will return the items that it was able to
-/// parse.
+/// If `p` is not able to parse enough items, this parser will return the items that it was
+/// able to parse.
+///
+/// **Note:** if `p` produces an error value created with the [`ParseError::other`] function,
+/// this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// See also: [`at_least`], [`exactly`], [`in_range`], [`mult`], [`mult1`].
 /// ## Examples
@@ -2408,6 +2569,12 @@ where
 /// This continues until either `q` or `p` fails.
 /// If `p` fails, the input consumed by `q` is restored.
 ///
+/// **Note:** if `p` or `q` produce an error value created with the [`ParseError::other`]
+/// function, this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// When called directly, the parsed items from `p` will be kept and those of `q` are ignored.
 /// When called as a [method of `Parser`](Parser::sep_by), the receiving parser (the `self`) is
 /// used as `p` and the `other` parser is used as `q`.
@@ -2442,14 +2609,26 @@ where
         input = next_input;
 
         loop {
-            if let Ok((tmp_input, _sep)) = q.parse(input) {
-                if let Ok((next_input, x)) = p.parse(tmp_input) {
-                    items.push(x);
-                    input = next_input;
-                    continue;
+            match q.parse(input) {
+                Err(e) if e.caused_by_other() => {
+                    return Err(e);
+                }
+                Err(_) => {
+                    break;
+                }
+                Ok((tmp_input, _sep)) => match p.parse(tmp_input) {
+                    Err(e) if e.caused_by_other() => {
+                        return Err(e);
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                    Ok((next_input, x)) => {
+                        items.push(x);
+                        input = next_input;
+                    }
                 }
             }
-            break;
         }
         Ok((input, items))
     }
@@ -2704,7 +2883,8 @@ where
 /// frontmost [`char`] of the previous state removed.
 /// This continues until an input state is reached that does not pass the predicate, or until the
 /// parser reaches the end of the input.
-/// Once this state has been found, the parser splits the input at that point and returns the front.
+/// Once this state has been found, the parser splits the input at that point and returns the
+/// front.
 ///
 /// Note that the output of this parser is a [`&str`], not an owned [`String`].
 ///
