@@ -1,5 +1,4 @@
 //! # bad_parsers
-//!
 //! A parser combinator library written by myself for myself.
 //!
 //! Don't say I didn't warn you.
@@ -9,38 +8,32 @@
 //! The provided parsers are able to parse from string slices, arbitrary token type slices,
 //! as well as other token collections you may wish to implement yourself.
 //!
-//! In addition to these qulities, using this library in your own project is guaranteed to
+//! As an added bonus, using this library in your own project is guaranteed to
 //! make it worse! For free!
-//!
 //! ## Main Features
-//!
 //! * A [Parser trait](Parser) that primarily interfaces with functions and closures that act
 //!     like parsers, but could also be used to treat other types as parsers as well.
 //! * A [Tokens trait](Tokens) that allows things to be parsed out of
 //!     arbitrary data types.<sup>[citation needed]</sup>
-//! * Slightly-above the bare minimum of error handling: [`ParseResult`]s can provide one (1)
-//!     error message when parsing is unsuccessful.
+//! * Vaguely useful error handling: [`ParseError`]s can provide useful information when
+//!     parsing is unsuccessful.
 //! * [Lazily evaluated parsers](lazy) that allow for recursive definitions.
 //! * A collection of common parser combinator utility functions to build custom parsers with.
-//!
-//! ## Overview of how the parsers work
-//!
+//! ## Overview of Parsers
 //! The job of a parser is to extract meaningful data from a collection of tokens.
-//! To this end, a parser can be thought of as a function from some input tokens to some kind of
-//! data the parser is looking for.
+//! To this end, a parser can be thought of as a function from some input tokens to some kind
+//! of data the parser is looking for.
 //! To achieve this, a parser will:
-//!
 //! * Examine the stream of tokens
 //! * Fail if it cannot find what it is looking for
 //! * If it does find it, return the parsed data *and* the remaining tokens
 //!
-//! The importance of returning the remaining tokens cannot be overstated, as this is what allows
-//! multiple simple parsers to be composed and chained together to create much more sophisticated parsers.
-//!
+//! The importance of returning the remaining tokens cannot be overstated, as this is what
+//! allows multiple simple parsers to be composed and chained together to create much more
+//! sophisticated parsers.
 //! ## [`Tokens`] and parser inputs
-//!
-//! As was already stated, parsers in this library are able to parse from arbitrary data types, as
-//! long as they implement the [`Tokens`] trait.
+//! As was already stated, parsers in this library are able to parse from arbitrary data
+//! types, as long as they implement the [`Tokens`] trait.
 //!
 //! Implementors of this trait are thought of as containers of individual tokens.
 //! In general, a type may implement [`Tokens<T>`] if:
@@ -50,8 +43,8 @@
 //!
 //! More precise implementation guidelines for this trait are available in its documentation.
 //!
-//! All parsers accept a token container as their input to parse from and parsers being combined
-//! together must operate on *the same token container type*.
+//! All parsers accept a token container as their input to parse from. Additionally, parsers
+//! being combined together must operate on *the same token container type*.
 //!
 //! Currently, [`Tokens`] is only implemented OOTB by [`&str`] and [`&[T]`](slice).
 //! In practice, these should be the only input types you would need to deal with.
@@ -60,9 +53,7 @@
 //! well as collections of arbitrary token types.
 //! This means that for applications such as parsing a programming language, the combinator
 //! framework can be used for both lexing **and** parsing.
-//!
 //! ## Creating parsers
-//!
 //! All parsers implement the trait [`Parser<'a, Toks, T, A>`](Parser).
 //! The type arguments are as follows:
 //!
@@ -76,13 +67,13 @@
 //! This is normally done by returning a [closure with the approriate
 //! signature](Parser#impl-Parser<'a,+Toks,+T,+A>-for-F):
 //! ```
-//! use bad_parsers::Parser;
+//! use bad_parsers::{Parser, ParseError};
 //!
 //! // parses a single i32 token if it's even
 //! fn custom_parser<'a>() -> impl Parser<'a, &'a [i32], i32, i32> {
 //!     |input: &'a [i32]| match input.iter().next() {
 //!         Some(x) if x % 2 == 0 => Ok((&input[1..], *x)),
-//!         _                     => Err("no even int".to_string()),
+//!         _ => Err(ParseError::no_parse("no even int", input)),
 //!     }
 //! }
 //!
@@ -95,8 +86,8 @@
 //!
 //! let p = custom_parser();
 //!
-//! assert_eq!(Err("no even int".to_string()), p.parse(starts_with1));
-//! assert_eq!(Ok((starts_with3, 2)), p.parse(starts_with2));
+//! assert!(p.parse(starts_with1).is_err());
+//! assert_eq!((starts_with3, 2), p.parse(starts_with2).unwrap());
 //! ```
 //! Note the above example alludes to a quirk to do with the lifetimes of inputs.
 //! That is explained more in-depth in the documentation of the [`Parser`] trait.
@@ -107,7 +98,23 @@
 //! Most of the provided combinator functions in this library will accept generic parser types.
 //! However, some will require a [`BoxedParser`].
 //! The most notable examples are the operator overloads for [`BoxedParser`].
+//! ## Error Handling
+//! When a parser fails, it returns an `Err` containing an error value of type
+//! [`ParseError<Toks, T>`].
+//! When implementing your own parsers, it is important to construct error values that
+//! accurately reflect the cause of the error.
 //!
+//! If you see a constructor function in [`ParseError`] that describes the reason that your
+//! parse has failed, such as [`ParseError::empty_input`] or [`ParseError::not_enough`],
+//! you should probably use that one.
+//! If some kind of fault occurs with a process that is not strictly a parser failure, such as
+//! an I/O operation failure or an overflow, you should use the [`ParseError::other`]
+//! constructor, which wraps an arbitrary error type from another process and behaves slightly
+//! differently in order to report the error correctly.
+//! When in doubt, the [`ParseError::no_parse`] constructor is the catch-all generic error type.
+//! Be sure to provide useful details when constructing this error type.
+//!
+//! More detailed information can be found in the [`ParseError` documentation](ParseError).
 //! ## Worked Example: Parsing an Integer
 //!
 //! Suppose we want to find an integer at the start of a string.
@@ -124,9 +131,9 @@
 //!
 //! let front_number = token_satisfies(char::is_ascii_digit);
 //!
-//! assert_eq!(Ok(("23", '1')), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", '3')), front_number.parse("3rest"));
-//! assert_eq!(Ok(("0rest", '3')), front_number.parse("30rest"));
+//! assert_eq!(("23", '1'), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", '3'), front_number.parse("3rest").unwrap());
+//! assert_eq!(("0rest", '3'), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
@@ -136,19 +143,20 @@
 //!
 //! A good first step, but we need to parse multiple digits.
 //! For a task like this, `bad_parsers` provides the [`mult1`] combinator.
-//! This takes a parser, and runs it multiple times over the input and collects the results in a
-//! [`Vec`].
+//! This takes a parser, and runs it multiple times over the input and collects the results in
+//! a [`Vec`].
 //! This new parser will keep collecting parsed values until it is unable to parse any more.
-//! This parser will also fail if it is unable to parse at least one item from the input, hence the
+//! This parser will also fail if it is unable to parse at least one item from the input,
+//! hence the
 //! name:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
 //!
 //! let front_number = token_satisfies(char::is_ascii_digit).mult1();
 //!
-//! assert_eq!(Ok(("", vec!['1', '2', '3'])), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", vec!['3'])), front_number.parse("3rest"));
-//! assert_eq!(Ok(("rest", vec!['3', '0'])), front_number.parse("30rest"));
+//! assert_eq!(("", vec!['1', '2', '3']), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", vec!['3']), front_number.parse("3rest").unwrap());
+//! assert_eq!(("rest", vec!['3', '0']), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
@@ -157,11 +165,11 @@
 //!
 //! We are now able to get all the digits from the start of a string.
 //! Unfortunately, a [`Vec<char>`] is not an integer that Rust can do arithmetic with.
-//! There are a few ways we could turn it into an integer, so I'm going to choose one of the more
-//! convoluted solutions to show off more of the library.
+//! There are a few ways we could turn it into an integer, so I'm going to choose one of the
+//! more convoluted solutions to show off more of the library.
 //! We'll be using the [`map`] combinator to turn the digit characters into integers.
-//! Note that the [`map`] is added *before* the [`mult1`], as we only want to work with one digit
-//! at a time for the moment:
+//! Note that the [`map`] is added *before* the [`mult1`], as we only want to work with one
+//! digitat a time for the moment:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
 //!
@@ -169,14 +177,14 @@
 //!     .map(|c| c.to_digit(10).unwrap())
 //!     .mult1();
 //!
-//! assert_eq!(Ok(("", vec![1, 2, 3])), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", vec![3])), front_number.parse("3rest"));
-//! assert_eq!(Ok(("rest", vec![3, 0])), front_number.parse("30rest"));
+//! assert_eq!(("", vec![1, 2, 3]), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", vec![3]), front_number.parse("3rest").unwrap());
+//! assert_eq!(("rest", vec![3, 0]), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
-//! It's safe to unwrap the result of [`to_digit`](char::to_digit) here because it should only receive actual digit
-//! characters as inputs.
+//! It's safe to unwrap the result of [`to_digit`](char::to_digit) here because it should
+//! only receive actual digit characters as inputs.
 //!
 //! With that, we're almost there!
 //! Our digits are now actual numbers.
@@ -198,18 +206,67 @@
 //!         n
 //!     });
 //!
-//! assert_eq!(Ok(("", 123)), front_number.parse("123"));
-//! assert_eq!(Ok(("rest", 3)), front_number.parse("3rest"));
-//! assert_eq!(Ok(("rest", 30)), front_number.parse("30rest"));
+//! assert_eq!(("", 123), front_number.parse("123").unwrap());
+//! assert_eq!(("rest", 3), front_number.parse("3rest").unwrap());
+//! assert_eq!(("rest", 30), front_number.parse("30rest").unwrap());
 //! assert!(front_number.parse("no front number").is_err());
 //! assert!(front_number.parse("").is_err());
 //! ```
 //! Success! We now have a parser that can extract an integer from the start of a string.
-//! With that being said, we could make this more friendly for other programmers who want to use
-//! this cutting-edge integer parsing technology.
-//! A programmer who is just trying to parse an integer doesn't really need to worry about the
-//! remaining input, but our parser still returns it.
-//! Let's put this parser in an easier-to-use function:
+//!
+//! There is a caveat with this parser, however: we haven't specified any custom error messages.
+//! If we leave this parser with just the default errors to report, we probably won't get a lot
+//! of useful information as to *why* the parser failed.
+//!
+//! Since our parser has been put together from various combinators, the best way to change
+//! the error value is to use the [`map_error`] function.
+//! This function works in a way similar to [`Result::map_err`] and allows for modification of
+//! the error value that the parser was going to return.
+//!
+//! For our parser, the [`token_satisfies`] can fail if it doesn't find a digit, but as long
+//! as it finds at least one, then the parser should still succeed.
+//! We only have that pesky zero-digit case to worry about, so we can add a helpful error
+//! message onto our [`mult1`] for when it can't find any digits:
+//! ```
+//! use bad_parsers::{Parser, token_satisfies};
+//!
+//! let front_number = token_satisfies(char::is_ascii_digit)
+//!     .map(|c| c.to_digit(10).unwrap())
+//!     .mult1()
+//!     .map_error(|mut e| {
+//!         e.set_details("front_number couldn't find any digits");
+//!         e
+//!     })
+//!     .map(|digs| {
+//!         let mut n = 0;
+//!         for d in digs {
+//!             n *= 10;
+//!             n += d;
+//!         }
+//!         n
+//!     });
+//!
+//! assert_eq!(("", 123), front_number.parse("123").unwrap());
+//!
+//! let expected = "Parser needed to parse 1 elements, but only parsed 0: front_number couldn't find any digits, Failed at: \"foo\"";
+//! assert_eq!(expected.to_string(), front_number.parse("foo").unwrap_err().to_string());
+//! ```
+//! Now that we've modified the details of the original [`ParseError`], the parser's error
+//! message clarifies that it was looking for digits, but couldn't find any.
+//! If this parser were part of a much larger chain, we could narrow down our search for the
+//! problem to parsers that look for digits.
+//! In this situation, we can see that the original error from [`mult1`] already stated that it
+//! was looking for at least one of something, as well as the part of the input where it failed.
+//!
+//! I must say, this is a pretty good-looking parser!
+//!
+//! With that being said, having to deal with the complex type of the parser and its result
+//! can be a bit clunky for more casual developers who want to use this cutting-edge integer
+//! parsing technology.
+//! If the user is just trying to parse an integer and doesn't really care about the
+//! remaining input or any error messages, then using the parser in multiple places could very
+//! quickly make the code tedious and noisy with all the [`Result`] unwrapping.
+//! We can deal with all of that by placing this parser in an easier-to-use function:
 //! ```
 //! use bad_parsers::{Parser, token_satisfies};
 //!
@@ -217,6 +274,10 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
+//!         .map_error(|mut e| {
+//!             e.set_details("front_number couldn't find any digits");
+//!             e
+//!         })
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -225,10 +286,7 @@
 //!             }
 //!             n
 //!         });
-//!     match p.parse(input) {
-//!         Ok((_, n)) => Some(n),
-//!         Err(_)     => None,
-//!     }
+//!     p.parse(input).ok().map(|(_input, n)| n)
 //! }
 //!
 //! assert_eq!(Some(123), parse_int("123"));
@@ -237,25 +295,28 @@
 //! assert!(parse_int("no front number").is_none());
 //! assert!(parse_int("").is_none());
 //! ```
-//! This works well enough, but is it *really* correct?
+//! This works well enough, but giving it some more thought, is the parser *really* correct?
 //! If an input string starts with an integer, but contains some more text after it, should it
 //! still be considered valid?
 //!
 //! Perhaps, perhaps not.
 //! But just for fun, let's modify this function to *only* return an integer when the string
 //! contains no extra text.
-//! We can do this with two more combinators.
 //! To check that there is no text left after the integer, we can use [`eof`].
 //! This special parser will succeed with a [`()`](unit) only if the input is empty.
-//! But to make it work together with our integer parser, we'll need to combine them together with
-//! [`plus`]:
+//! But to make it work together with our integer parser, we'll need to combine them together
+//! with [`plus`]:
 //! ```
-//! use bad_parsers::{Parser, eof, token_satisfies};
+//! use bad_parsers::{Parser, token_satisfies, eof};
 //!
 //! fn parse_int(input: &str) -> Option<u32> {
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
+//!         .map_error(|mut e| {
+//!             e.set_details("front_number couldn't find any digits");
+//!             e
+//!         })
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -265,10 +326,7 @@
 //!             n
 //!         })
 //!         .plus(eof());
-//!     match p.parse(input) {
-//!         Ok((_, (n, ()))) => Some(n),
-//!         Err(_)           => None,
-//!     }
+//!     p.parse(input).ok().map(|(_input, (n, ()))| n)
 //! }
 //!
 //! assert_eq!(Some(123), parse_int("123"));
@@ -277,22 +335,27 @@
 //! assert!(parse_int("no front number").is_none());
 //! assert!(parse_int("").is_none());
 //! ```
-//! Now only the first input is parsed successfully, as the two after it have trailing text.
+//! Now only the first input in our tests is parsed successfully, as the two after it have
+//! trailing text.
 //!
-//! Also note that the returned value has changed types f-rom [`u32`] to [`(u32, ())`](tuple).
-//! This is due to the use of `plus`, which will run two parsers in sequence, and return the values
-//! of both when they both succeed, and fail completely unless both parsers succeed.
+//! Also note that the returned value has changed types from [`u32`] to [`(u32, ())`](tuple).
+//! This is due to the use of `plus`, which runs two parsers in sequence, and return the
+//! values of both when they both succeed, but will fail completely unless both parsers succeed.
 //!
-//! Of course, in this situation we only care about the first value being returned, so we can
-//! replace [`plus`] with a variant called [`left`], which works the same as [`plus`] but only returns
-//! the first value:
+//! Since we only care about the first value being returned in this situation, we can replace
+//! [`plus`] with a variant called [`left`], which works the same as [`plus`] but only returns
+//! the first value.
 //! ```
-//! use bad_parsers::{Parser, eof, token_satisfies};
+//! use bad_parsers::{Parser, token_satisfies, eof};
 //!
 //! fn parse_int(input: &str) -> Option<u32> {
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
+//!         .map_error(|mut e| {
+//!             e.set_details("front_number couldn't find any digits");
+//!             e
+//!         })
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -302,10 +365,7 @@
 //!             n
 //!         })
 //!         .left(eof());
-//!     match p.parse(input) {
-//!         Ok((_, n)) => Some(n),
-//!         Err(_)     => None,
-//!     }
+//!     p.parse(input).ok().map(|(_input, n)| n)
 //! }
 //!
 //! assert_eq!(Some(123), parse_int("123"));
@@ -322,25 +382,8 @@
 //! I really ought to submit this feature to the Rust development team.
 //! The standard library could really make use of this-
 //! ```
-//! # use bad_parsers::{Parser, eof, token_satisfies};
-//! # fn parse_int(input: &str) -> Option<u32> {
-//! #     let p = token_satisfies(char::is_ascii_digit)
-//! #         .map(|c| c.to_digit(10).unwrap())
-//! #         .mult1()
-//! #         .map(|digs| {
-//! #             let mut n = 0;
-//! #             for d in digs {
-//! #                 n *= 10;
-//! #                 n += d;
-//! #             }
-//! #             n
-//! #         })
-//! #         .left(eof());
-//! #     match p.parse(input) {
-//! #        Ok((_, n)) => Some(n),
-//! #        Err(_)     => None,
-//! #    }
-//! # }
+//! # // do you really need to see it working again?
+//! # fn parse_int(_input: &str) -> Option<u32> { Some(123) }
 //! let x: u32 = parse_int("123").unwrap();
 //!
 //! let y: u32 = str::parse("123").unwrap();
@@ -349,20 +392,375 @@
 //! assert_ne!("time taken", "well-spent");
 //! ```
 //! Oh.
-
+use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
-/// Alias for the `Err` type of [`ParseResult`].
+#[derive(Debug)]
+enum ErrorType<Toks> {
+    NoParse {
+        loc: Toks,
+    },
+    EmptyInput,
+    UnexpectedInput {
+        loc: Toks,
+    },
+    Flunk {
+        loc: Toks,
+    },
+    NotEnough {
+        loc: Toks,
+        needed: usize,
+        got: usize,
+    },
+    Other {
+        cause: Box<dyn std::error::Error>,
+        loc: Toks,
+    },
+}
+
+/// The `Err` type of [`ParseResult`].
 ///
-/// For now it's just a string.
-/// This might change to allow for different error types on different parsers if I can be bothered
-/// to try and make that work.
-pub type ParseError = String;
+/// Instances of this struct are returned by parsers when they are unsuccessful.
+///
+/// This type provides various functions and methods for the creation and modification of
+/// error values.
+/// It is not advised to create values of [`ParseError`] without one of the provided constructor
+/// functions, nor to pattern-match or destructure this type.
+/// The reason as to why this is the case is ~~because Rust is a temperamental pile of
+/// garbage~~ due to some quirks with Rust's type system.
+///
+/// Constructing different kinds of errors with this type will require providing differing
+/// amounts of information depending on the specificity of the error type.
+/// An error type like [`ParseError::not_enough`] requires providing extra information related
+/// to the number of parsed elements, while [`ParseError::empty_input`] requires no extra
+/// information at all.
+/// The two most common values to give a constructor are:
+/// * `details`: a `&str` providing extra human-readable information about this specific failure
+/// * `loc` a `Toks` providing the input that the parser failed to parse from
+///
+/// When providing `details`, the information should be relevant to the specific parser in
+/// your parser chain.
+/// For example, if a parser looking for a single digit is just a wrapped around
+/// [`token_satisfies`], and the error message is not modified, the parser will return a
+/// generic error message that a predicate failed.
+///
+/// Example of providing a useful message via [`map_error`]:
+/// ```
+/// use bad_parsers::{Parser, ParseError, Tokens, token_satisfies};
+///
+/// let digit = token_satisfies(char::is_ascii_digit)
+///     .map_error(|e: ParseError<&str, char>| {
+///         if let Some(input) = e.get_loc_non_empty() {
+///             let c = input.take_one().unwrap().1;
+///             ParseError::no_parse(
+///                 &format!("expected a digit, but found: {:?}", c),
+///                 input,
+///             )
+///         } else {
+///             ParseError::empty_input()
+///         }
+///     });
+/// ```
+#[derive(Debug)]
+pub struct ParseError<Toks, T> {
+    error_type: ErrorType<Toks>,
+    details: Option<String>,
+    _phantom: PhantomData<T>,
+}
+
+impl<Toks, T> ParseError<Toks, T> {
+    /// Signals that a parser has failed to parse due to the input ending sooner than expected.
+    pub fn empty_input() -> Self {
+        Self {
+            error_type: ErrorType::EmptyInput,
+            details: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Signals that a parser has failed to parse because it expected the input to be empty,
+    /// but it was not.
+    ///
+    /// See also: [`eof`].
+    pub fn unexpected_input(loc: Toks) -> Self
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        Self {
+            error_type: ErrorType::UnexpectedInput { loc },
+            details: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Signals that a parser has failed intentionally.
+    ///
+    /// See also: [`flunk`], [`flunk_with`].
+    pub fn flunk(details: &str, loc: Toks) -> Self
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        Self {
+            error_type: ErrorType::Flunk { loc },
+            details: Some(details.to_owned()),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Signals that a parser has failed to parse whatever it was trying to parse.
+    ///
+    /// This variant is intended to be the generic failure type.
+    /// When you need your parser to fail and you are unsure of which error type to use, you
+    /// should probably use this one.
+    ///
+    /// Due to being the generic failure type, it is not able to provide much information on
+    /// its own.
+    /// As such, it is advisable to provide more details than normal when using this error type.
+    pub fn no_parse(details: &str, loc: Toks) -> Self
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        Self {
+            error_type: ErrorType::NoParse { loc },
+            details: Some(details.to_owned()),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Signals that a parser has failed due to being unable to parse as many elements as it
+    /// should have.
+    ///
+    /// This variant is intended to be used by parsers that repeatedly run *a single, specific
+    /// parser* in order to collect multiple elements.
+    ///
+    /// See also: [`at_least`], [`in_range`], [`mult1`], [`sep_by`].
+    pub fn not_enough(loc: Toks, needed: usize, got: usize) -> Self
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        Self {
+            error_type: ErrorType::NotEnough { loc, needed, got },
+            details: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Signals that a parser has failed due to external factors.
+    ///
+    /// This variant is intended to be used when parsing was not successful due to factors
+    /// outside of the parsing chain, such as [I/O errors](std::io::Error).
+    /// A more robust system of forwarding arbitrary error types may be implemented ~~when the
+    /// Rust developers finally make up their minds on how error conversion with `?` is
+    /// supposed to work seriously it shouldn't be this hard~~ in the future.
+    ///
+    /// **REMINDER:** this error type is **not** the catch-all generic error type.
+    /// If your parser simply fails to parse, but not for any of the reasons associated with
+    /// the other variants, you should use [`ParseError::no_parse`], not this.
+    ///
+    /// Error values created with this function cannot be modified via [`map_error`], as it
+    /// would not be a good idea to discard such error information.
+    ///
+    /// Failing with this error type will cause parsers produced by certain combinators in
+    /// this library to fail in situations where they would otherwise be unaffected.
+    /// The complete (though not strictly up-to-date) list of such combinators is:
+    /// * [`at_least`]
+    /// * [`at_most`]
+    /// * [`first_of!`]
+    /// * [`in_range`]
+    /// * [`mult`]
+    /// * [`mult1`]
+    /// * [`optional`]
+    /// * [`or`]
+    /// * [`recover`]
+    /// * [`recover_default`]
+    /// * [`sep_by`]
+    pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
+        Self {
+            error_type: ErrorType::Other {
+                cause: Box::new(cause),
+                loc,
+            },
+            details: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Returns the specific details of this failure, if there are any.
+    pub fn get_details(&self) -> Option<&str> {
+        self.details.as_deref()
+    }
+
+    /// Overwrites the specific details of this failure.
+    pub fn set_details(&mut self, msg: &str) {
+        self.details = Some(msg.to_owned());
+    }
+
+    /// Returns the input that was unable to be parsed from.
+    ///
+    /// Not all error types are able to provide a meaningful input state to report, hence why
+    /// this function returns an [`Option`].
+    ///
+    /// **Caution:** the above statement implies that if this error *does* contain an input
+    /// state, then the input should also be non-empty.
+    /// However, this should not be assumed to always be true, and this method makes no such
+    /// guarantee.
+    ///
+    /// If your error reporting requires a non-empty input to refer to, consider using
+    /// [`ParseError::get_loc_non_empty`] instead.
+    pub fn get_loc(&self) -> Option<Toks>
+    where
+        Toks: Clone + Copy,
+    {
+        match self.error_type {
+            ErrorType::EmptyInput => None,
+            ErrorType::UnexpectedInput { loc }
+            | ErrorType::Flunk { loc }
+            | ErrorType::NoParse { loc }
+            | ErrorType::NotEnough { loc, .. }
+            | ErrorType::Other { loc, .. } => Some(loc),
+        }
+    }
+
+    /// Returns the non-empty input that was unable to be parsed from.
+    ///
+    /// Not all error types are able to provide a meaningful input state to report, hence why
+    /// this function returns an [`Option`].
+    ///
+    /// The input states returned by this method are guaranteed to be non-empty.
+    ///
+    /// If your error reporting does not require the input to be non-empty, you may wish to use
+    /// [`ParseError::get_loc`] instead.
+    pub fn get_loc_non_empty(&self) -> Option<Toks>
+    where
+        Toks: Tokens<T>,
+        T: Clone + Debug,
+    {
+        match self.get_loc() {
+            Some(loc) if !loc.no_tokens() => Some(loc),
+            _ => None,
+        }
+    }
+
+    /// Returns whether or not this error was caused by another (non-parsing related) error.
+    ///
+    /// If this returns `true`, a parser should not attempt to recover from this error.
+    /// This is because the parsing will have failed not due to parser failure, but by being
+    /// interrupted by another class of error that should be handled
+    /// outside of the parser chain.
+    ///
+    /// See also: [`Parser::map_error`].
+    pub fn caused_by_other(&self) -> bool {
+        matches!(self.error_type, ErrorType::Other { .. })
+    }
+}
+
+// Safety:
+// Data types across all variants of ErrorType<Toks>
+// * usize: Sync+Send
+// * Box<dyn Error>: Sync+Send implemented by Box<T>
+// * Toks: Sync+Send if enforced by trait bound
+// ErrorType<Toks> can implement Sync+Send IF: Toks: Sync+Send
+//
+// Composition of ParseError<Toks, T>
+// * error_type: ErrorType<Toks>: Send+Snc as established above
+// * details: String: Sync+Send
+// * _phantom: PhantomData<T>: Sync+Send IF T: Sync+Send
+// ParseError<Toks, T> can implement Sync+Send IF Toks: Sync+Send AND T: Sync+Send
+unsafe impl<Toks, T> Sync for ParseError<Toks, T>
+where
+    Toks: Sync,
+    T: Send,
+{
+}
+unsafe impl<Toks, T> Send for ParseError<Toks, T>
+where
+    Toks: Send,
+    T: Send,
+{
+}
+
+impl<Toks, T> fmt::Display for ParseError<Toks, T>
+where
+    Toks: Tokens<T>,
+    T: Clone + Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let details = self
+            .get_details()
+            .unwrap_or("(no extra information available)");
+
+        match self.error_type {
+            ErrorType::EmptyInput => {
+                write!(f, "Parser was expecting more input, but there was none")
+            }
+            ErrorType::UnexpectedInput { loc } => {
+                write!(
+                    f,
+                    "Parser expected no more input, but found: {}",
+                    loc.preview()
+                )
+            }
+            ErrorType::Other { loc, .. } => {
+                write!(
+                    f,
+                    "An error occurred while parsing, Failed at: {}",
+                    loc.preview()
+                )
+            }
+            ErrorType::Flunk { loc } => {
+                write!(
+                    f,
+                    "Parser flunked: {}, Flunked at: {}",
+                    details,
+                    loc.preview()
+                )
+            }
+            ErrorType::NoParse { loc } => {
+                write!(
+                    f,
+                    "Parser was unsuccessful: {}, Failed at: {}",
+                    details,
+                    loc.preview()
+                )
+            }
+            ErrorType::NotEnough { loc, needed, got } => {
+                write!(
+                    f,
+                    "Parser needed to parse {} elements, but only parsed {}: {}, Failed at: {}",
+                    needed,
+                    got,
+                    details,
+                    loc.preview()
+                )
+            }
+        }
+    }
+}
+
+impl<Toks, T> std::error::Error for ParseError<Toks, T>
+where
+    Toks: Tokens<T> + Debug,
+    T: Clone + Debug,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        if let ErrorType::Other { cause, .. } = &self.error_type {
+            cause.source()
+        } else {
+            None
+        }
+    }
+}
 
 /// The `Result` type returned by parsers.
 ///
 /// A successful parser will return the remaining input as well as the value that was parsed.
-pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
+/// A failed parser will return a [`ParseError`] detailing why the parser failed.
+pub type ParseResult<'a, Toks, T, A> = Result<(Toks, A), ParseError<Toks, T>>;
 
 /// Interface for collections of tokens.
 ///
@@ -371,7 +769,7 @@ pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
 ///
 /// ## How to implement this trait
 ///
-/// Don't. Just convert whatever you need to parse from into a slice and you're good to go.
+/// Don't. Just convert whatever input you need to parse into a slice and you're good to go.
 ///
 /// ### But I wanna!
 ///
@@ -395,13 +793,15 @@ pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
 ///
 /// ## Why do we need `T: Clone`?
 ///
-/// The `T: Clone` constraint is required for us to work with inputs immutably.
+/// The `T: Clone` constraint is required to ensure that we can work with inputs immutably.
 /// This is mandated by this library because parsers may be tasked with operating on the same
 /// inputs, which could cause parsers to consume input that others may need access to.
 ///
 /// For example, consider two parsers that operate on [`&str`].
-/// The first parser is looking for the word `"food"`, and the other is looking for the word `"fool"`.
-/// Suppose that both parsers are implemented by checking each character in the input one at a time:
+/// The first parser is looking for the word `"food"`, and the other is looking for the
+/// word `"fool"`.
+/// Suppose that both parsers are implemented by checking each character in the input one at
+/// a time:
 /// ```txt
 /// invoking food_p.parse("food"):
 ///
@@ -425,7 +825,8 @@ pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
 ///
 /// results for these inputs with the fool_p parser are left as an exercise for the reader
 /// ```
-/// Now suppose we combine these two parsers into a parser that tries to parse `"food"` *or* `"fool"`, in that order.
+/// Now suppose we combine these two parsers into a parser that tries to parse `"food"`
+/// *or* `"fool"`, in that order.
 /// Remember that in these hypotheticals, the input data is being mutated:
 /// ```txt
 /// food_or_fool = food_p.or(fool_p)
@@ -457,8 +858,8 @@ pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
 /// 'f' - err     | "l"
 /// failed        | "l"
 /// ```
-/// Even though the input should have been parsed by the parser that was looking for `"fool"`, the
-/// modification of the input took away the data that it was looking for.
+/// Even though the input should have been parsed by the parser that was looking for `"fool"`,
+/// the modification of the input took away the data that it was looking for.
 ///
 /// This problem is resolved when the sub-parsers are given the same starting inputs:
 /// ```txt
@@ -479,8 +880,9 @@ pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
 /// success (fool) | ""
 /// ```
 /// Some other parser combinator libraries (such as Haskell's
-/// [Parsec](https://hackage.haskell.org/package/parsec)) fix this issue by requiring the programmer
-/// to explicitly mark where the input should be preserved in the event of parser failure.
+/// [Parsec](https://hackage.haskell.org/package/parsec)) fix this issue by requiring the
+/// programmer to explicitly mark where the input should be preserved in the event of
+/// parser failure.
 /// This library instead opts to *always* preserve the input for the convienience of the
 /// programmer, at the cost of not being as performant.
 /// If your project cannot afford to take this performance hit,
@@ -488,12 +890,12 @@ pub type ParseResult<'a, Toks, A> = Result<(Toks, A), ParseError>;
 pub trait Tokens<T>
 where
     Self: Sized + Deref + Copy + Clone,
-    T: Clone,
+    T: Clone + Debug,
 {
     /// Attempts to take a single token from the collection.
     ///
-    /// When implementing this trait, this method *must not* mutate `self`, as other parsers rely
-    /// on token data remaining unmodified between parsers.
+    /// When implementing this trait, this method *must not* mutate `self`, as other parsers
+    /// rely on token data remaining unmodified between parsers.
     /// To get a better idea of what your implementation of this method should look like, you may
     /// refer to the [`&str`](#impl-Tokens<char>-for-%26str) and
     /// [`&[T]`](#impl-Tokens<T>-for-%26[T]) implementations.
@@ -504,6 +906,11 @@ where
     /// When implementing this trait, there is usually an `is_empty` method for your container
     /// that you can use here.
     fn no_tokens(&self) -> bool;
+
+    /// Returns a preview of the front of the token stream.
+    ///
+    /// This method is used for error reporting.
+    fn preview(&self) -> String;
 }
 
 impl<'a> Tokens<char> for &'a str {
@@ -514,11 +921,27 @@ impl<'a> Tokens<char> for &'a str {
     fn no_tokens(&self) -> bool {
         self.is_empty()
     }
+
+    fn preview(&self) -> String {
+        let mut preview_end: usize = 35;
+
+        if self.len() <= preview_end {
+            return format!("\"{}\"", &self);
+        }
+
+        // if the ending index if partway through a character,
+        // move it backwards until it isn't
+        while !self.is_char_boundary(preview_end) {
+            preview_end -= 1;
+        }
+
+        format!("\"{} ...\"", &self[..preview_end])
+    }
 }
 
 impl<'a, T> Tokens<T> for &'a [T]
 where
-    T: Clone,
+    T: Clone + Debug,
 {
     fn take_one(self) -> Option<(&'a [T], T)>
     where
@@ -529,6 +952,11 @@ where
 
     fn no_tokens(&self) -> bool {
         self.is_empty()
+    }
+
+    fn preview(&self) -> String {
+        let preview_end: usize = 8;
+        format!("{:?}", &self[..preview_end])
     }
 }
 
@@ -544,8 +972,8 @@ where
 /// * `A: 'a` - the type of what this parser tries to parse.
 ///
 /// Please note that the constraints listed here are only the most fundamental constraints.
-/// Other functions in this library will usually require other constraints to be satisfied in order
-/// for them to work properly.
+/// Other functions in this library will usually require other constraints to be satisfied
+/// in order for them to work properly.
 /// Please see the documentation for the [`Tokens<T>`] trait for more information about the
 /// constraints of parser inputs.
 ///
@@ -563,7 +991,7 @@ where
 ///
 /// let r1 = p1.parse("abcd");
 /// let r2 = p2.parse("abcd");
-/// assert_eq!(r1, r2);
+/// assert_eq!(r1.unwrap(), r2.unwrap());
 /// ```
 /// An issue you may encounter when parsing from non-static inputs is that, depending on how your
 /// code is organized, the compiler may determine your input will not live long enough for your
@@ -579,7 +1007,7 @@ where
 /// let nums = [1, 2, 3, 4, 5, 6];
 /// let nums_slice = nums.as_slice();
 ///
-/// assert_eq!(Ok((&nums_slice[2..], (1, 2))), two_tokens.parse(nums_slice));
+/// assert_eq!((&nums_slice[2..], (1, 2)), two_tokens.parse(nums_slice).unwrap());
 /// ```
 /// Trying to compile the above code will produce an error that looks somthing like this:
 /// ```txt
@@ -614,15 +1042,15 @@ where
 /// // Parser defined second
 /// let two_tokens = any_token().plus(any_token());
 ///
-/// assert_eq!(Ok((&nums_slice[2..], (1, 2))), two_tokens.parse(nums_slice));
+/// assert_eq!((&nums_slice[2..], (1, 2)), two_tokens.parse(nums_slice).unwrap());
 /// ```
 pub trait Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T>,
-    T: Clone,
+    T: Clone + Debug,
 {
     /// Attempt to parse from the given input.
-    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, A>;
+    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, T, A>;
 
     /// Put `Self` into a [`BoxedParser`].
     fn boxed(self) -> BoxedParser<'a, Toks, T, A>
@@ -635,15 +1063,15 @@ where
         BoxedParser::new(self)
     }
 
-    /// Method version of [`set_error`].
-    fn set_error<F>(self, f: F) -> impl Parser<'a, Toks, T, A>
+    /// Method version of [`map_error`].
+    fn map_error<F>(self, f: F) -> impl Parser<'a, Toks, T, A>
     where
         Self: Sized + 'a,
         Toks: 'a,
         A: 'a,
-        F: Fn(ParseError) -> ParseError + 'a,
+        F: Fn(ParseError<Toks, T>) -> ParseError<Toks, T> + 'a,
     {
-        set_error(self, f)
+        map_error(self, f)
     }
 
     /// Method version of [`and_then`].
@@ -910,17 +1338,17 @@ where
 ///
 /// ## Examples
 /// ```
-/// use bad_parsers::{Tokens, Parser, ParseResult};
+/// use bad_parsers::{Tokens, Parser, ParseResult, ParseError};
 ///
 /// // This function can be treated as a parser directly
-/// fn take_one<'a, Toks, T>(input: Toks) -> ParseResult<'a, Toks, T>
+/// fn take_one<'a, Toks, T>(input: Toks) -> ParseResult<'a, Toks, T, T>
 /// where
 ///     Toks: Tokens<T> + 'a,
-///     T: Clone,
+///     T: Clone + std::fmt::Debug,
 /// {
 ///     match input.take_one() {
 ///         Some((rest, t)) => Ok((rest, t)),
-///         None            => Err("no tokens".to_string())
+///         None => Err(ParseError::empty_input()),
 ///     }
 /// }
 ///
@@ -928,24 +1356,33 @@ where
 /// fn token<'a, Toks, T>(find: T) -> impl Parser<'a, Toks, T, T>
 /// where
 ///     Toks: Tokens<T> + 'a,
-///     T: Clone + Eq + 'a,
+///     T: Clone + std::fmt::Debug + Eq + 'a,
 /// {
 ///     move |input: Toks| match input.take_one() {
-///         Some((rest, t)) if t == find => Ok((rest, t)),
-///         _ => Err("could not find specified token".to_string()),
+///         Some((rest, t)) => {
+///             if t == find {
+///                 Ok((rest, t))
+///             } else {
+///                 Err(ParseError::no_parse(
+///                     &format!("could not find token '{:?}'", find),
+///                     input
+///                 ))
+///             }
+///         }
+///         None => Err(ParseError::empty_input()),
 ///     }
 /// }
 ///
-/// assert_eq!(Ok(("bcd", 'a')), take_one.parse("abcd"));
-/// assert_eq!(Ok(("bcd", 'a')), token('a').parse("abcd"));
+/// assert_eq!(("bcd", 'a'), take_one.parse("abcd").unwrap());
+/// assert_eq!(("bcd", 'a'), token('a').parse("abcd").unwrap());
 /// ```
 impl<'a, Toks, T, A, F> Parser<'a, Toks, T, A> for F
 where
-    F: Fn(Toks) -> ParseResult<'a, Toks, A> + 'a,
+    F: Fn(Toks) -> ParseResult<'a, Toks, T, A> + 'a,
     Toks: Tokens<T>,
-    T: Clone,
+    T: Clone + Debug,
 {
-    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, A> {
+    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, T, A> {
         self(input)
     }
 }
@@ -968,7 +1405,7 @@ impl<'a, Toks, T, A> BoxedParser<'a, Toks, T, A> {
     where
         Self: Sized + 'a,
         Toks: Tokens<T> + 'a,
-        T: Clone,
+        T: Clone + Debug,
         A: 'a,
         P: Parser<'a, Toks, T, A> + 'a,
     {
@@ -982,9 +1419,9 @@ impl<'a, Toks, T, A> BoxedParser<'a, Toks, T, A> {
 impl<'a, Toks, T, A> Parser<'a, Toks, T, A> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T>,
-    T: Clone,
+    T: Clone + Debug,
 {
-    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, A> {
+    fn parse(&self, input: Toks) -> ParseResult<'a, Toks, T, A> {
         self.parser.parse(input)
     }
 
@@ -999,7 +1436,7 @@ where
 impl<'a, Toks, T, A, B> Add<BoxedParser<'a, Toks, T, B>> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
     B: 'a,
 {
@@ -1014,7 +1451,7 @@ where
 impl<'a, Toks, T, A, B> Shl<BoxedParser<'a, Toks, T, B>> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
     B: 'a,
 {
@@ -1029,7 +1466,7 @@ where
 impl<'a, Toks, T, A, B> Shr<BoxedParser<'a, Toks, T, B>> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
     B: 'a,
 {
@@ -1044,7 +1481,7 @@ where
 impl<'a, Toks, T, A> Mul<usize> for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
 {
     type Output = BoxedParser<'a, Toks, T, Vec<A>>;
@@ -1058,7 +1495,7 @@ where
 impl<'a, Toks, T, A> BitOr for BoxedParser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     A: 'a,
 {
     type Output = Self;
@@ -1074,13 +1511,21 @@ where
 /// As such, the parser created from this macro will attempt to parse the input with each
 /// [`Parser`] it was provided with, *in the order they were given*.
 /// The first time a parser succeeds, this parser will return that result.
-/// If none of the parsers succeed, then this parser will fail. Currently this parser does not
-/// provide an error implying it was created from this macro, though this is subject to change.
+/// If none of the parsers succeed, then this parser will fail.
+/// Currently this parser does not specifically provide an error implying it was created from
+/// this macro, though this is subject to change.
+///
+/// **Note:** if any of the provided parsers produce an error value created with the
+/// [`ParseError::other`] function before any of the parsers are successful, this parser will
+/// *not* attempt to parse with the remaining parsers and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// This macro requires at least two parser arguments to be invoked. This restriction exists
 /// partly for type-checking reasons, but primarily becuase trying to use this macro with
 /// less than two parsers would be unusual, and it is unclear what kind of parser the macro
-/// should produce in such a situation.
+/// should even produce in such a situation.
 ///
 /// It also gave me a name error while I was testing the single-parser case, which as far as
 /// I'm concerned is a capital offense.
@@ -1092,9 +1537,9 @@ where
 ///
 /// let p = first_of![string("abc"), string("ab"), string("a")];
 ///
-/// assert_eq!(Ok(("", "abc")), p.parse("abc"));
-/// assert_eq!(Ok(("x", "ab")), p.parse("abx"));
-/// assert_eq!(Ok(("xy", "a")), p.parse("axy"));
+/// assert_eq!(("", "abc"), p.parse("abc").unwrap());
+/// assert_eq!(("x", "ab"), p.parse("abx").unwrap());
+/// assert_eq!(("xy", "a"), p.parse("axy").unwrap());
 /// assert!(p.parse("no matches here").is_err());
 /// ```
 #[macro_export]
@@ -1114,7 +1559,8 @@ macro_rules! first_of {
 ///
 /// Using parsers lazily can sometimes improve performance, but the primary reason this function
 /// exists is to allow for parsers with recursive definitions.
-/// Without lazy evaluation, attempting to recursively define a parser will cause an infinite loop.
+/// Without lazy evaluation, attempting to recursively define a parser will cause an
+/// infinite loop.
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, BoxedParser, lazy, token};
@@ -1132,47 +1578,69 @@ macro_rules! first_of {
 /// let p = recursive_parser();
 ///
 /// assert!(p.parse("c").is_err());
-/// assert_eq!(Ok(("", 'b')), p.parse("b"));
-/// assert_eq!(Ok(("", 'b')), p.parse("ab"));
-/// assert_eq!(Ok(("", 'b')), p.parse("aaab"));
+/// assert_eq!(("", 'b'), p.parse("b").unwrap());
+/// assert_eq!(("", 'b'), p.parse("ab").unwrap());
+/// assert_eq!(("", 'b'), p.parse("aaab").unwrap());
 /// ```
 pub fn lazy<'a, Toks, T, A, F, P>(f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     F: Fn() -> P + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
     move |input| f().parse(input)
 }
 
-// Docs on this function are purposefully unhelpful as error handling
-// is going to be overhauled at some point.
-/// Changes the given parser's error message with the provided function.
+/// Changes the given parser's error value with the provided function.
 ///
+/// This function provides another option for modifying the error values of failed parsers, as
+/// using a function like this may be more convinient than manually matching against
+/// [`ParseResult`]s.
+///
+/// **Note:** this function explicitly prohibits the modification/replacement of error values
+/// created with the [`ParseError::other`] function, as such errors were caused by factors
+/// outside of the parser chain. However, this function does not prohibit the creation of
+/// such error values.
+///
+/// See also: [`ParseError`].
 /// ## Examples
 /// ```
-/// use bad_parsers::{Parser, token};
+/// use bad_parsers::{Parser, ParseError, token};
 ///
 /// let p1 = token('a');
-/// let p2 = token('a').set_error(|_| "custom message".to_string());
+/// let p2 = token('a').map_error(|mut e| {
+///     e.set_details("custom message");
+///     e
+/// });
 ///
 /// // Fails with default error message
-/// let msg1 = p1.parse("b").unwrap_err();
+/// let expected1 = "Parser was unsuccessful: predicate of ensure failed, Failed at: \"b\"";
+/// let msg1 = p1.parse("b").unwrap_err().to_string();
 /// // Fails with custom error message
-/// let msg2 = p2.parse("b").unwrap_err();
+/// let expected2 = "Parser was unsuccessful: custom message, Failed at: \"b\"";
+/// let msg2 = p2.parse("b").unwrap_err().to_string();
 ///
-/// assert_eq!("custom message".to_string(), msg2);
-/// assert_ne!(msg1, msg2);
+/// assert_eq!(expected1, msg1);
+/// assert_eq!(expected2, msg2);
 /// ```
-pub fn set_error<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
+pub fn map_error<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     P: Parser<'a, Toks, T, A> + 'a,
-    F: Fn(ParseError) -> ParseError + 'a,
+    F: Fn(ParseError<Toks, T>) -> ParseError<Toks, T> + 'a,
 {
-    move |input| p.parse(input).map_err(&f)
+    let map_f = move |e: ParseError<Toks, T>| {
+        // If this error was caused by an external error,
+        // do not allow the user-provided function to modify it.
+        if e.caused_by_other() {
+            e
+        } else {
+            f(e)
+        }
+    };
+    move |input| p.parse(input).map_err(&map_f)
 }
 
 /// Creates a parser that always succeeds and performs no meaningful operations.
@@ -1183,12 +1651,12 @@ where
 ///
 /// let p = identity();
 ///
-/// assert_eq!(Ok(("what did you expect?", ())), p.parse("what did you expect?"));
+/// assert_eq!(("what did you expect?", ()), p.parse("what did you expect?").unwrap());
 /// ```
 pub fn identity<'a, Toks, T>() -> impl Parser<'a, Toks, T, ()>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
     move |input| Ok((input, ()))
 }
@@ -1206,19 +1674,19 @@ where
 ///
 /// let p = token('a').left(eof());
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
 /// assert!(p.parse("a and some other stuff").is_err());
 /// ```
 pub fn eof<'a, Toks, T>() -> impl Parser<'a, Toks, T, ()>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
     move |input: Toks| {
         if input.no_tokens() {
             Ok((input, ()))
         } else {
-            Err("expected eof, found more tokens".to_string())
+            Err(ParseError::unexpected_input(input))
         }
     }
 }
@@ -1230,24 +1698,27 @@ where
 /// Since it never actually returns a value, the return type of this parser can be
 /// coerced into whatever is needed to make it fit in your parser chain.
 ///
-/// It's usually a good idea to set the error of this parser to something meaningful.
+/// It's usually a good idea to manually change the error of this parser into something
+/// meaningful.
 ///
-/// See also: [`flunk`], [`set_error`].
+/// See also: [`flunk`], [`map_error`].
 /// ## Examples
 /// ```
-/// use bad_parsers::{Parser, flunk};
+/// use bad_parsers::{Parser, ParseError, flunk};
 ///
-/// let p = flunk::<&str, char, ()>().set_error(|_| "something meaningful".to_string());
+/// let p = flunk::<&str, char, ()>();
 ///
-/// assert_eq!(Err("something meaningful".to_string()), p.parse(""));
-/// assert_eq!(Err("something meaningful".to_string()), p.parse("foo"));
+/// let msg1 = format!("Parser flunked: flunked parser, Flunked at: \"\"");
+/// let msg2 = format!("Parser flunked: flunked parser, Flunked at: \"foo\"");
+/// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
+/// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
 /// ```
 pub fn flunk<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
-    |_| Err("flunked parser".to_string())
+    |input| Err(ParseError::flunk("flunked parser", input))
 }
 
 /// Creates a parser that always fails with a specified error.
@@ -1258,24 +1729,26 @@ where
 /// coerced into whatever is needed to make it fit in your parser chain.
 ///
 /// This function can be used as a more conveinient way to create a failing parser with a custom
-/// message than calling [`flunk`] and then [`set_error`].
+/// message than calling [`flunk`] and then [`map_error`].
 ///
-/// See also: [`flunk`], [`set_error`].
+/// See also: [`flunk`], [`map_error`].
 /// ## Examples
 /// ```
-/// use bad_parsers::{Parser, flunk_with};
+/// use bad_parsers::{Parser, ParseError, flunk_with};
 ///
-/// let p = flunk_with::<&str, char, ()>("custom message".to_string());
+/// let p = flunk_with::<&str, char, ()>("custom message");
 ///
-/// assert_eq!(Err("custom message".to_string()), p.parse(""));
-/// assert_eq!(Err("custom message".to_string()), p.parse("foo"));
+/// let msg1 = format!("Parser flunked: custom message, Flunked at: \"\"");
+/// let msg2 = format!("Parser flunked: custom message, Flunked at: \"foo\"");
+/// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
+/// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
 /// ```
-pub fn flunk_with<'a, Toks, T, A>(msg: String) -> impl Parser<'a, Toks, T, A>
+pub fn flunk_with<'a, Toks, T, A>(message: &'a str) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
-    move |_| Err(msg.clone())
+    move |input| Err(ParseError::flunk(message, input))
 }
 
 /// Creates a parser that always succeeds with the given value.
@@ -1291,13 +1764,13 @@ where
 ///
 /// let p = succeed(42);
 ///
-/// assert_eq!(Ok(("", 42)), p.parse(""));
-/// assert_eq!(Ok(("foo", 42)), p.parse("foo"));
+/// assert_eq!(("", 42), p.parse("").unwrap());
+/// assert_eq!(("foo", 42), p.parse("foo").unwrap());
 /// ```
 pub fn succeed<'a, Toks, T, A>(value: A) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: Clone + 'a,
 {
     move |input| Ok((input, value.clone()))
@@ -1316,13 +1789,13 @@ where
 /// let p = succeed_default::<&str, char, u32>();
 /// let expected = u32::default();
 ///
-/// assert_eq!(Ok(("", expected)), p.parse(""));
-/// assert_eq!(Ok(("foo", expected)), p.parse("foo"));
+/// assert_eq!(("", expected), p.parse("").unwrap());
+/// assert_eq!(("foo", expected), p.parse("foo").unwrap());
 /// ```
 pub fn succeed_default<'a, Toks, T, A>() -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: Default + 'a,
 {
     move |input| Ok((input, A::default()))
@@ -1345,15 +1818,15 @@ where
 /// // Parses any token if it occurs twice in a row, only returns one copy
 /// let p = any_token().and_then(|t| token(t));
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("aa"));
-/// assert_eq!(Ok(("a", 'b')), p.parse("bba"));
+/// assert_eq!(("", 'a'), p.parse("aa").unwrap());
+/// assert_eq!(("a", 'b'), p.parse("bba").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse("ab").is_err());
 /// ```
 pub fn and_then<'a, Toks, T, A, P, F, Q, B>(p: P, f: F) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(A) -> Q + 'a,
@@ -1373,13 +1846,13 @@ where
 ///
 /// let p = token('a').map(u32::from);
 ///
-/// assert_eq!(Ok(("", 97)), p.parse("a"));
+/// assert_eq!(("", 97), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn map<'a, Toks, T, A, P, F, B>(p: P, f: F) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(A) -> B + 'a,
@@ -1405,13 +1878,13 @@ where
 ///
 /// let p = token('a').ignore();
 ///
-/// assert_eq!(Ok(("", ())), p.parse("a"));
+/// assert_eq!(("", ()), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn ignore<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, ()>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     P: Parser<'a, Toks, T, A> + 'a,
 {
     move |input1| {
@@ -1432,13 +1905,13 @@ where
 ///
 /// let p = token('a').convert();
 ///
-/// assert_eq!(Ok(("", 97_u32)), p.parse("a"));
+/// assert_eq!(("", 97_u32), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn convert<'a, Toks, T, A, P, B>(p: P) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: Into<B> + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     B: 'a,
@@ -1458,13 +1931,13 @@ where
 ///
 /// let p = token('a').replace(42);
 ///
-/// assert_eq!(Ok(("", 42)), p.parse("a"));
+/// assert_eq!(("", 42), p.parse("a").unwrap());
 /// assert!(p.parse("b").is_err());
 /// ```
 pub fn replace<'a, Toks, T, A, P, B>(p: P, value: B) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     B: Clone + 'a,
@@ -1482,6 +1955,12 @@ where
 /// If `p` fails, the parser will attempt to parse the same input with `q` and return whatever
 /// the result of that is, success or fail.
 ///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* attempt to parse with `q`.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// When called directly, `p` will be used first and `q` second.
 /// When called as a [method of `Parser`](Parser::or), the receiving parser (the `self`) is
 /// used first and the `other` parser is used second.
@@ -1497,19 +1976,20 @@ where
 /// // will try to parse "ab" before "a"
 /// let p = string("ab").or(string("a"));
 ///
-/// assert_eq!(Ok(("", "ab")), p.parse("ab"));
-/// assert_eq!(Ok(("c", "a")), p.parse("ac"));
+/// assert_eq!(("", "ab"), p.parse("ab").unwrap());
+/// assert_eq!(("c", "a"), p.parse("ac").unwrap());
 /// assert!(p.parse("neither").is_err());
 /// ```
 pub fn or<'a, Toks, T, A, P, Q>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, A> + 'a,
 {
     move |input| match p.parse(input) {
+        Err(e) if e.caused_by_other() => Err(e),
         Err(_) => q.parse(input),
         ok => ok,
     }
@@ -1521,6 +2001,12 @@ where
 /// When `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
 /// returns `value`.
 ///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return the provided value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// `A` is required to implement [`Clone`] because the parser can run multiple times and will
 /// need to produce the same value on each failed parse.
 ///
@@ -1531,14 +2017,14 @@ where
 ///
 /// let p = token('a').recover('_');
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
-/// assert_eq!(Ok(("", '_')), p.parse(""));
-/// assert_eq!(Ok(("b", '_')), p.parse("b"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert_eq!(("", '_'), p.parse("").unwrap());
+/// assert_eq!(("b", '_'), p.parse("b").unwrap());
 /// ```
 pub fn recover<'a, Toks, T, A, P>(p: P, value: A) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO: figure out why rust complains about the lifetime here
+    T: Clone + Debug + 'a, // TODO: figure out why rust complains about the lifetime here
     A: Clone + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1551,6 +2037,12 @@ where
 /// When `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
 /// returns the result of `A::default`.
 ///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return a default value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// Naturally, `A` must implement [`Default`] to generate a default value.
 ///
 /// See also: [`optional`], [`recover`].
@@ -1560,14 +2052,14 @@ where
 ///
 /// let p = token('a').map(u32::from).recover_default();
 ///
-/// assert_eq!(Ok(("", 97)), p.parse("a"));
-/// assert_eq!(Ok(("", 0)), p.parse(""));
-/// assert_eq!(Ok(("b", 0)), p.parse("b"));
+/// assert_eq!(("", 97), p.parse("a").unwrap());
+/// assert_eq!(("", 0), p.parse("").unwrap());
+/// assert_eq!(("b", 0), p.parse("b").unwrap());
 /// ```
 pub fn recover_default<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO: same lifetime oddity as recover
+    T: Clone + Debug + 'a, // TODO: same lifetime oddity as recover
     A: Default + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1576,9 +2068,15 @@ where
 
 /// Wraps the return value in an `Option`, allows parsing to continue on failure.
 ///
-/// If `p` succeeds, the parser returns the value it normally would within a [`Some`].
+/// If `p` succeeds, the parser returns the value it normally would within a `Some`.
 /// If `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
-/// returns a [`None`].
+/// returns a `None`.
+///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return a `None` value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// See also: [`recover`], [`recover_default`].
 /// ## Examples
@@ -1587,19 +2085,20 @@ where
 ///
 /// let p = token('a').optional();
 ///
-/// assert_eq!(Ok(("", Some('a'))), p.parse("a"));
-/// assert_eq!(Ok(("", None)), p.parse(""));
-/// assert_eq!(Ok(("b", None)), p.parse("b"));
+/// assert_eq!(("", Some('a')), p.parse("a").unwrap());
+/// assert_eq!(("", None), p.parse("").unwrap());
+/// assert_eq!(("b", None), p.parse("b").unwrap());
 /// ```
 pub fn optional<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Option<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) => Ok((rest, Some(x))),
+        Err(e) if e.caused_by_other() => Err(e),
         Err(_) => Ok((input, None)),
     }
 }
@@ -1628,20 +2127,21 @@ where
 /// // Parse an aribtrary sequence of ints, as long as they are *all* in ascending order.
 /// let p = any_token().mult().ensure(|ns| ns.is_sorted());
 ///
-/// assert_eq!(Ok((&nums1[5..], vec![1, 2, 3, 4, 5])), p.parse(nums1));
+/// assert_eq!((&nums1[5..], vec![1, 2, 3, 4, 5]), p.parse(nums1).unwrap());
 /// assert!(p.parse(nums2).is_err());
 /// ```
 pub fn ensure<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(&A) -> bool + 'a,
 {
     move |input| match p.parse(input) {
         Ok((rest, x)) if f(&x) => Ok((rest, x)),
-        _ => Err("predicate failed".to_string()),
+        Ok(_) => Err(ParseError::no_parse("predicate of ensure failed", input)),
+        Err(e) => Err(e),
     }
 }
 
@@ -1669,13 +2169,13 @@ where
 /// // Parse an aribtrary sequence of ints, as long as they are *all* in ascending order.
 /// let p = any_token().mult().reject(|ns| ns.is_sorted());
 ///
-/// assert_eq!(Ok((&nums2[5..], vec![1, 2, 9, 4, 5])), p.parse(nums2));
+/// assert_eq!((&nums2[5..], vec![1, 2, 9, 4, 5]), p.parse(nums2).unwrap());
 /// assert!(p.parse(nums1).is_err());
 /// ```
 pub fn reject<'a, Toks, T, A, P, F>(p: P, f: F) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     F: Fn(&A) -> bool + 'a,
@@ -1709,7 +2209,7 @@ where
 ///
 /// let p = token('a').plus(token('b').convert::<u32>());
 ///
-/// assert_eq!(Ok(("", ('a', 98))), p.parse("ab"));
+/// assert_eq!(("", ('a', 98)), p.parse("ab").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ba").is_err());
@@ -1718,7 +2218,7 @@ where
 pub fn plus<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, (A, B)>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -1757,7 +2257,7 @@ where
 ///
 /// let p = token('a').left(token('b').convert::<u32>());
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("ab"));
+/// assert_eq!(("", 'a'), p.parse("ab").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ba").is_err());
@@ -1766,7 +2266,7 @@ where
 pub fn left<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO also lifetime oddity, is it map()?
+    T: Clone + Debug + 'a, // TODO also lifetime oddity, is it map()?
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -1801,7 +2301,7 @@ where
 ///
 /// let p = token('a').right(token('b').convert::<u32>());
 ///
-/// assert_eq!(Ok(("", 98)), p.parse("ab"));
+/// assert_eq!(("", 98), p.parse("ab").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ba").is_err());
@@ -1810,7 +2310,7 @@ where
 pub fn right<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a, // TODO same as above
+    T: Clone + Debug + 'a, // TODO same as above
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -1826,6 +2326,13 @@ where
 /// If `p` parses less than the lower limit of the range, this parser will fail.
 /// If `p` parses up to the upper limit of the range, this parser will stop parsing and return
 /// all of the parsed items.
+///
+/// **Note:** if `p` has already parsed the minimum number of elements, but then produces an
+/// error value created with the [`ParseError::other`] function, this parser will *not* return
+/// the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// Ranges can be specified with range literals, as well as any other type that implements
 /// [`RangeBounds<usize>`].
@@ -1845,14 +2352,14 @@ where
 ///
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ab").is_err());
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("a", vec!['a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("a", vec!['a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn in_range<'a, Toks, T, A, P, R>(p: P, range: R) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     R: RangeBounds<usize> + 'a,
@@ -1878,13 +2385,19 @@ where
 
         // not possible to parse a correct number of values
         if max < min {
-            return Err(format!("impossible parser range: {}..={}", min, max));
+            return Err(ParseError::no_parse(
+                &format!("impossible parser range: {}..={}", min, max),
+                input,
+            ));
         }
 
         let mut values = vec![];
 
         while values.len() < max {
             match p.parse(input) {
+                Err(e) if e.caused_by_other() => {
+                    return Err(e);
+                }
                 Err(_) => {
                     break;
                 }
@@ -1896,11 +2409,7 @@ where
         }
 
         if values.len() < min {
-            Err(format!(
-                "needed to parse {} elements, only got {}",
-                min,
-                values.len()
-            ))
+            Err(ParseError::not_enough(input, min, values.len()))
         } else {
             Ok((input, values))
         }
@@ -1915,6 +2424,12 @@ where
 /// input if `p` never fails.
 /// If `p` is unable to parse any elements, this parser will return an empty [`Vec<A>`].
 ///
+/// **Note:** if `p` produces an error value created with the [`ParseError::other`] function,
+/// this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// **WARNING:** if `p` is able to successfully parse things *without consuming any input*,
 /// then running this parser may create an infinite loop.
 ///
@@ -1925,16 +2440,16 @@ where
 ///
 /// let p = token('a').mult();
 ///
-/// assert_eq!(Ok(("b", vec![])), p.parse("b"));
-/// assert_eq!(Ok(("b", vec!['a'])), p.parse("ab"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("b", vec![]), p.parse("b").unwrap());
+/// assert_eq!(("b", vec!['a']), p.parse("ab").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn mult<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1949,6 +2464,13 @@ where
 /// input if `p` never fails.
 /// If `p` is unable to parse any elements, this parser will fail.
 ///
+/// **Note:** if `p` has already parsed an element, but then produces an error value created
+/// with the [`ParseError::other`] function, this parser will *not* return the already-parsed
+/// elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// **WARNING:** if `p` is able to successfully parse things *without consuming any input*,
 /// then running this parser may create an infinite loop.
 ///
@@ -1960,15 +2482,15 @@ where
 /// let p = token('a').mult1();
 ///
 /// assert!(p.parse("b").is_err());
-/// assert_eq!(Ok(("b", vec!['a'])), p.parse("ab"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("b", vec!['a']), p.parse("ab").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn mult1<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -1994,13 +2516,13 @@ where
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ab").is_err());
 /// assert!(p.parse("aa").is_err());
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("a", vec!['a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("a", vec!['a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn exactly<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2015,6 +2537,13 @@ where
 /// input if `p` never fails.
 /// If `p` is unable to parse a minimum of `n` elements, this parser will fail.
 ///
+/// **Note:** if `p` has already parsed the minimum number of elements, but then produces an
+/// error value created with the [`ParseError::other`] function, this parser will *not* return
+/// the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// **WARNING:** if `p` is able to successfully parse things *without consuming any input*,
 /// then running this parser may create an infinite loop.
 ///
@@ -2028,13 +2557,13 @@ where
 /// assert!(p.parse("b").is_err());
 /// assert!(p.parse("ab").is_err());
 /// assert!(p.parse("aa").is_err());
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn at_least<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2046,8 +2575,14 @@ where
 /// This combinator behaves identically to `in_range(p, ..=n)`.
 ///
 /// This parser will repeatedly parse with `p` until it has parsed exactly `n` items.
-/// If `p` is not able to parse enough items, this parser will return the items that it was able to
-/// parse.
+/// If `p` is not able to parse enough items, this parser will return the items that it was
+/// able to parse.
+///
+/// **Note:** if `p` produces an error value created with the [`ParseError::other`] function,
+/// this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
 ///
 /// See also: [`at_least`], [`exactly`], [`in_range`], [`mult`], [`mult1`].
 /// ## Examples
@@ -2056,16 +2591,16 @@ where
 ///
 /// let p = token('a').at_most(3);
 ///
-/// assert_eq!(Ok(("b", vec![])), p.parse("b"));
-/// assert_eq!(Ok(("b", vec!['a'])), p.parse("ab"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("aa"));
-/// assert_eq!(Ok(("", vec!['a', 'a', 'a'])), p.parse("aaa"));
-/// assert_eq!(Ok(("a", vec!['a', 'a', 'a'])), p.parse("aaaa"));
+/// assert_eq!(("b", vec![]), p.parse("b").unwrap());
+/// assert_eq!(("b", vec!['a']), p.parse("ab").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("aa").unwrap());
+/// assert_eq!(("", vec!['a', 'a', 'a']), p.parse("aaa").unwrap());
+/// assert_eq!(("a", vec!['a', 'a', 'a']), p.parse("aaaa").unwrap());
 /// ```
 pub fn at_most<'a, Toks, T, A, P>(p: P, n: usize) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
@@ -2101,6 +2636,12 @@ where
 /// This continues until either `q` or `p` fails.
 /// If `p` fails, the input consumed by `q` is restored.
 ///
+/// **Note:** if `p` or `q` produce an error value created with the [`ParseError::other`]
+/// function, this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
 /// When called directly, the parsed items from `p` will be kept and those of `q` are ignored.
 /// When called as a [method of `Parser`](Parser::sep_by), the receiving parser (the `self`) is
 /// used as `p` and the `other` parser is used as `q`.
@@ -2113,17 +2654,17 @@ where
 ///
 /// let p = token('a').sep_by(token(','));
 ///
-/// assert_eq!(Ok(("", vec!['a'])), p.parse("a"));
-/// assert_eq!(Ok(("", vec!['a', 'a'])), p.parse("a,a"));
-/// assert_eq!(Ok((",", vec!['a', 'a'])), p.parse("a,a,"));
-/// assert_eq!(Ok((",b", vec!['a', 'a'])), p.parse("a,a,b"));
+/// assert_eq!(("", vec!['a']), p.parse("a").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse("a,a").unwrap());
+/// assert_eq!((",", vec!['a', 'a']), p.parse("a,a,").unwrap());
+/// assert_eq!((",b", vec!['a', 'a']), p.parse("a,a,b").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse(",a").is_err());
 /// ```
 pub fn sep_by<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, Vec<A>>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -2135,14 +2676,26 @@ where
         input = next_input;
 
         loop {
-            if let Ok((tmp_input, _sep)) = q.parse(input) {
-                if let Ok((next_input, x)) = p.parse(tmp_input) {
-                    items.push(x);
-                    input = next_input;
-                    continue;
+            match q.parse(input) {
+                Err(e) if e.caused_by_other() => {
+                    return Err(e);
                 }
+                Err(_) => {
+                    break;
+                }
+                Ok((tmp_input, _sep)) => match p.parse(tmp_input) {
+                    Err(e) if e.caused_by_other() => {
+                        return Err(e);
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                    Ok((next_input, x)) => {
+                        items.push(x);
+                        input = next_input;
+                    }
+                },
             }
-            break;
         }
         Ok((input, items))
     }
@@ -2166,8 +2719,8 @@ where
 /// let surround = token_satisfies(|c: &char| c.is_whitespace()).mult1();
 /// let p = token('a').within(surround);
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse(" a "));
-/// assert_eq!(Ok(("", 'a')), p.parse(" \n  a  \r "));
+/// assert_eq!(("", 'a'), p.parse(" a ").unwrap());
+/// assert_eq!(("", 'a'), p.parse(" \n  a  \r ").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse(" a").is_err());
 /// assert!(p.parse("a ").is_err());
@@ -2176,7 +2729,7 @@ where
 pub fn within<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -2207,8 +2760,8 @@ where
 ///
 /// let p = token('a').between(token('<'), token('>'));
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("<a>"));
-/// assert_eq!(Ok(("extra", 'a')), p.parse("<a>extra"));
+/// assert_eq!(("", 'a'), p.parse("<a>").unwrap());
+/// assert_eq!(("extra", 'a'), p.parse("<a>extra").unwrap());
 /// assert!(p.parse("a").is_err());
 /// assert!(p.parse("<a").is_err());
 /// assert!(p.parse("a>").is_err());
@@ -2221,7 +2774,7 @@ pub fn between<'a, Toks, T, A, P, Q, B, R, C>(
 ) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
@@ -2244,20 +2797,19 @@ where
 ///
 /// let p = any_token();
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
-/// assert_eq!(Ok(("cde", 'b')), p.parse("bcde"));
-/// assert_eq!(Ok(("しい日の誕生", '新')), p.parse("新しい日の誕生"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert_eq!(("cde", 'b'), p.parse("bcde").unwrap());
+/// assert_eq!(("しい日の誕生", '新'), p.parse("新しい日の誕生").unwrap());
 /// assert!(p.parse("").is_err());
 /// ```
 pub fn any_token<'a, Toks, T>() -> impl Parser<'a, Toks, T, T>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone,
+    T: Clone + Debug,
 {
-    move |input: Toks| {
-        input
-            .take_one()
-            .ok_or("expected a token, got eof".to_string())
+    move |input: Toks| match input.take_one() {
+        None => Err(ParseError::empty_input()),
+        Some((rest, t)) => Ok((rest, t)),
     }
 }
 
@@ -2277,15 +2829,15 @@ where
 ///
 /// let p = token_satisfies(is_vowel);
 ///
-/// assert_eq!(Ok(("bcd", 'a')), p.parse("abcd"));
-/// assert_eq!(Ok(("bcd", 'e')), p.parse("ebcd"));
+/// assert_eq!(("bcd", 'a'), p.parse("abcd").unwrap());
+/// assert_eq!(("bcd", 'e'), p.parse("ebcd").unwrap());
 /// assert!(p.parse("fbcd").is_err());
 /// assert!(p.parse("").is_err());
 /// ```
 pub fn token_satisfies<'a, Toks, T, F>(f: F) -> impl Parser<'a, Toks, T, T>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     F: Fn(&T) -> bool + 'a,
 {
     ensure(any_token(), f)
@@ -2301,15 +2853,15 @@ where
 ///
 /// let p = token('a');
 ///
-/// assert_eq!(Ok(("", 'a')), p.parse("a"));
-/// assert_eq!(Ok(("b", 'a')), p.parse("ab"));
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert_eq!(("b", 'a'), p.parse("ab").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse("ba").is_err());
 /// ```
 pub fn token<'a, Toks, T>(tok: T) -> impl Parser<'a, Toks, T, T>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + PartialEq + 'a,
+    T: Clone + Debug + PartialEq + 'a,
 {
     token_satisfies(move |t| *t == tok)
 }
@@ -2317,7 +2869,8 @@ where
 /// Parses a literal string slice.
 ///
 /// This parser is essentially a wrapper for [`&str::strip_prefix`].
-/// As such, this parser will succeed if the front of the input matches the provided string slice.
+/// As such, this parser will succeed if the front of the input matches the provided string
+/// slice.
 ///
 /// Note that the output of this parser is a [`&str`], not an owned [`String`].
 /// ## Examples
@@ -2326,9 +2879,9 @@ where
 ///
 /// let p = string("foo");
 ///
-/// assert_eq!(Ok(("", "foo")), p.parse("foo"));
-/// assert_eq!(Ok(("d", "foo")), p.parse("food"));
-/// assert_eq!(Ok(("l", "foo")), p.parse("fool"));
+/// assert_eq!(("", "foo"), p.parse("foo").unwrap());
+/// assert_eq!(("d", "foo"), p.parse("food").unwrap());
+/// assert_eq!(("l", "foo"), p.parse("fool").unwrap());
 /// assert!(p.parse("").is_err());
 /// assert!(p.parse("f").is_err());
 /// assert!(p.parse("fo").is_err());
@@ -2337,15 +2890,19 @@ where
 pub fn string<'a>(target: &'a str) -> impl Parser<'a, &'a str, char, &'a str> {
     move |input: &'a str| match input.strip_prefix(target) {
         Some(rest) => Ok((rest, target)),
-        None => Err(format!("could not parse string literal:{:?}", target)),
+        None => Err(ParseError::no_parse(
+            &format!("could not parse string literal:{:?}", target),
+            input,
+        )),
     }
 }
 
 /// Parses from a string slice while the given predicate holds true, per character.
 ///
-/// This parser iterates through each [`char`] in the input and checks if it passes the predicate.
-/// Once it has found a [`char`] that does not pass the predicate, or reaches the end of the input,
-/// the parser splits the input at that point and returns the front.
+/// This parser iterates through each [`char`] in the input and checks if it passes the
+/// predicate.
+/// Once it has found a [`char`] that does not pass the predicate, or reaches the end of the
+/// input, the parser splits the input at that point and returns the front.
 ///
 /// Note that the output of this parser is a [`&str`], not an owned [`String`].
 ///
@@ -2363,9 +2920,9 @@ pub fn string<'a>(target: &'a str) -> impl Parser<'a, &'a str, char, &'a str> {
 ///
 /// let p = span_string_char(is_vowel);
 ///
-/// assert_eq!(Ok(("bcd", "a")), p.parse("abcd"));
-/// assert_eq!(Ok(("", "aeiou")), p.parse("aeiou"));
-/// assert_eq!(Ok(("xaeiou", "")), p.parse("xaeiou"));
+/// assert_eq!(("bcd", "a"), p.parse("abcd").unwrap());
+/// assert_eq!(("", "aeiou"), p.parse("aeiou").unwrap());
+/// assert_eq!(("xaeiou", ""), p.parse("xaeiou").unwrap());
 /// ```
 pub fn span_string_char<'a, F>(f: F) -> impl Parser<'a, &'a str, char, &'a str>
 where
@@ -2393,7 +2950,8 @@ where
 /// frontmost [`char`] of the previous state removed.
 /// This continues until an input state is reached that does not pass the predicate, or until the
 /// parser reaches the end of the input.
-/// Once this state has been found, the parser splits the input at that point and returns the front.
+/// Once this state has been found, the parser splits the input at that point and returns the
+/// front.
 ///
 /// Note that the output of this parser is a [`&str`], not an owned [`String`].
 ///
@@ -2404,10 +2962,10 @@ where
 ///
 /// let p = span_string_slice(|s| s.len() > 2);
 ///
-/// assert_eq!(Ok(("cd", "ab")), p.parse("abcd"));
-/// assert_eq!(Ok(("a", "")), p.parse("a"));
-/// assert_eq!(Ok(("", "")), p.parse(""));
-/// assert_eq!(Ok(("21", "9876543")), p.parse("987654321"));
+/// assert_eq!(("cd", "ab"), p.parse("abcd").unwrap());
+/// assert_eq!(("a", ""), p.parse("a").unwrap());
+/// assert_eq!(("", ""), p.parse("").unwrap());
+/// assert_eq!(("21", "9876543"), p.parse("987654321").unwrap());
 /// ```
 pub fn span_string_slice<'a, F>(f: F) -> impl Parser<'a, &'a str, char, &'a str>
 where
@@ -2448,13 +3006,13 @@ where
 /// // Will parse all tokens in `arr`.
 /// let p3 = span_slice(|n: &i32| *n > 0);
 ///
-/// assert_eq!(Ok((&nums[2..], &nums[0..2])), p1.parse(nums));
-/// assert_eq!(Ok((nums, &nums[0..0])), p2.parse(nums));
-/// assert_eq!(Ok((&nums[4..], nums)), p3.parse(nums));
+/// assert_eq!((&nums[2..], &nums[0..2]), p1.parse(nums).unwrap());
+/// assert_eq!((nums, &nums[0..0]), p2.parse(nums).unwrap());
+/// assert_eq!((&nums[4..], nums), p3.parse(nums).unwrap());
 /// ```
 pub fn span_slice<'a, T, F>(f: F) -> impl Parser<'a, &'a [T], T, &'a [T]>
 where
-    T: Clone + 'a,
+    T: Clone + Debug + 'a,
     F: Fn(&T) -> bool + 'a,
 {
     move |input: &'a [T]| {
@@ -2516,6 +3074,105 @@ mod tests {
             assert!(!(&nums[..=i]).no_tokens());
         }
     }
+
+    #[test]
+    fn parse_error_get_set_details() {
+        let mut e = ParseError::<&str, char>::empty_input();
+        assert_eq!(None, e.get_details());
+
+        e.set_details("details1");
+        assert_eq!(Some("details1"), e.get_details());
+        e.set_details("details2");
+        assert_eq!(Some("details2"), e.get_details());
+    }
+
+    #[test]
+    fn parse_error_loc() {
+        let e = ParseError::<&str, char>::empty_input();
+        assert_eq!(None, e.get_loc());
+        assert_eq!(None, e.get_loc_non_empty());
+
+        let e = ParseError::no_parse("details", "");
+        assert_eq!(Some(""), e.get_loc());
+        assert_eq!(None, e.get_loc_non_empty());
+
+        let e = ParseError::no_parse("details", "input");
+        assert_eq!(Some("input"), e.get_loc());
+        assert_eq!(Some("input"), e.get_loc_non_empty());
+    }
+
+    fn make_io_error() -> Result<(), std::io::Error> {
+        std::fs::read("filethatdoesntexist").map(|_| ())
+    }
+
+    // In the future, god willing, the map_err can be replaced with just a question mark
+    fn fails_with_other(input: &str) -> ParseResult<&str, char, char> {
+        let _dummy = make_io_error().map_err(|e| ParseError::other(e, input))?;
+        Ok((input, 'a')) // <--- this shouldn't happen
+    }
+
+    #[test]
+    fn parse_error_caused_by_other() {
+        let inner = make_io_error().unwrap_err();
+        let e = ParseError::<&str, char>::other(inner, "input");
+        assert!(e.caused_by_other());
+
+        let e = ParseError::<&str, char>::empty_input();
+        assert!(!e.caused_by_other());
+    }
+
+    #[test]
+    fn parse_error_other_stops_recovery() {
+        macro_rules! run_test {
+            ($p:expr) => {
+                let p = $p;
+                let e = p.parse("input").unwrap_err();
+                assert!(e.caused_by_other());
+            };
+        }
+
+        run_test!(fails_with_other.at_least(0));
+        run_test!(fails_with_other.at_most(3));
+        run_test!(first_of![token('a'), fails_with_other, token('i')]);
+        run_test!(fails_with_other.in_range(0..3));
+        run_test!(fails_with_other.mult());
+        run_test!(token('i').or(fails_with_other).mult1());
+        run_test!(fails_with_other.optional());
+        run_test!(fails_with_other.or(token('i')));
+        run_test!(fails_with_other.recover('a'));
+        run_test!(fails_with_other.recover_default());
+        run_test!(token('i').sep_by(fails_with_other));
+
+        let p = fails_with_other;
+        let e = p.parse("input").unwrap_err();
+        assert!(e.get_details().is_none());
+        assert!(e.caused_by_other());
+        assert_eq!(Some("input"), e.get_loc());
+
+        let p = fails_with_other.map_error(|_| {
+            ParseError::no_parse("details that shouldn't be here", "different input")
+        });
+        let e = p.parse("input").unwrap_err();
+        assert!(e.get_details().is_none());
+        assert!(e.caused_by_other());
+        assert_eq!(Some("input"), e.get_loc());
+    }
+
+    /*
+    This is on ice until Rust finally settles on a way to convert between error types
+    that doesn't involve manually implementing From for every single error type in existence
+    fn fails_with_other_converts(input: &str) -> ParseResult<&str, char, char> {
+        let _dummy = make_io_error()?;
+        Ok((input, 'a')) // <--- this shouldn't happen
+    }
+
+    #[test]
+    fn parse_error_proper_error_behaviour() {
+        let p = fails_with_other_converts;
+
+        let e = p.parse("aaaa").unwrap_err();
+        assert!(e.caused_by_other());
+    }*/
 
     macro_rules! p_test {
         ($name:ident, $toks:ty, $a:ty, $p:expr, $good:expr, $bad:expr,) => {
@@ -2612,11 +3269,17 @@ mod tests {
     );
 
     #[test]
-    fn test_set_error() {
-        let p = token('a').set_error(|_| "custom message".to_string());
+    fn test_map_error() {
+        let p = token('a').map_error(|mut e| {
+            e.set_details("couldn't find letter 'a'");
+            e
+        });
 
-        assert_eq!(Ok(("", 'a')), p.parse("a"));
-        assert_eq!(Err("custom message".to_string()), p.parse("b"));
+        let e = ParseError::no_parse("couldn't find letter 'a'", "b");
+        let expected = e.to_string();
+
+        assert_eq!(("", 'a'), p.parse("a").unwrap());
+        assert_eq!(expected, p.parse("b").unwrap_err().to_string());
     }
 
     p_test!(
@@ -2674,11 +3337,18 @@ mod tests {
 
     #[test]
     fn test_flunk_with() {
-        let p = flunk_with::<&str, char, ()>("message".to_string());
+        let p = flunk_with::<&str, char, ()>("message");
 
-        assert_eq!(Err("message".to_string()), p.parse(""));
-        assert_eq!(Err("message".to_string()), p.parse("foo"));
-        assert_eq!(Err("message".to_string()), p.parse("anything"));
+        let msg1 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "");
+        let msg2 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "foo");
+        let msg3 = format!(
+            "Parser flunked: {}, Flunked at: \"{}\"",
+            "message", "anything"
+        );
+
+        assert_eq!(msg1, p.parse("").unwrap_err().to_string());
+        assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
+        assert_eq!(msg3, p.parse("anything").unwrap_err().to_string());
     }
 
     p_test!(
