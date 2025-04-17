@@ -505,15 +505,34 @@ impl<Toks, T> ParseError<Toks, T> {
         }
     }
 
-    /// Signals that a parser has failed due to a non-specific reason.
+    /// Signals that a parser has failed due to external factors.
     ///
     /// This variant is intended to be used when parsing was not successful due to factors
     /// outside of the parsing chain, such as [I/O errors](std::io::Error).
     /// A more robust system of forwarding arbitrary error types may be implemented in the
     /// future.
     ///
+    /// **REMINDER:** this error type is **not** the catch-all generic error type.
     /// If your parser simply fails to parse, but not for any of the reasons associated with
     /// the other variants, you should use [`ParseError::no_parse`], not this.
+    ///
+    /// Error values created with this function cannot be modified via [`map_error`], as it
+    /// would not be a good idea to discard such error information.
+    ///
+    /// Failing with this error type will cause parsers produced by certain combinators in
+    /// this library to fail in situations where they would otherwise be unaffected.
+    /// The complete (though not strictly up-to-date) list of such combinators is:
+    /// * [`at_least`]
+    /// * [`at_most`]
+    /// * [`first_of!`]
+    /// * [`in_range`]
+    /// * [`mult`]
+    /// * [`mult1`]
+    /// * [`optional`]
+    /// * [`or`]
+    /// * [`recover`]
+    /// * [`recover_default`]
+    /// * [`sep_by`]
     pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
         Self {
             error_type: ErrorType::Other { cause: Box::new(cause), loc },
