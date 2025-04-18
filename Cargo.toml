@@ -4,6 +4,7 @@ version = "0.1.0-unstable"
 authors = ["Matthew Hall"]
 edition = "2024"
 description = "A parser combinator library written by myself, for myself"
+documentation = "https://docs.rs/bad_parsers"
 readme = "README.md"
 repository = "https://github.com/HallMatthew314/bad_parsers"
 license = "GPL-3.0"
