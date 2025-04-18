@@ -3,13 +3,13 @@
 //!
 //! Don't say I didn't warn you.
 //!
-//! `bad_parsers` is a parser combinator library written entirely from scratch in safe Rust
+//! `bad_parsers` is a parser combinator library written entirely from scratch in ~~safe~~ Rust
 //! with no external dependencies.
 //! The provided parsers are able to parse from string slices, arbitrary token type slices,
 //! as well as other token collections you may wish to implement yourself.
 //!
-//! As an added bonus, using this library in your own project is guaranteed to
-//! make it worse! For free!
+//! As an added bonus, using this library in your own project is guaranteed to make it worse!
+//! For free!
 //! ## Main Features
 //! * A [Parser trait](Parser) that primarily interfaces with functions and closures that act
 //!     like parsers, but could also be used to treat other types as parsers as well.
@@ -223,6 +223,12 @@
 //! This function works in a way similar to [`Result::map_err`] and allows for modification of
 //! the error value that the parser was going to return.
 //!
+//! Our parser has been put together from various combinators, so we shouldn't need to bother
+//! with creating the error type ourselves.
+//! In fact, all we really need to do is provide some more-specific details about how/why the
+//! parser failed.
+//! To that end, we can use the [`error_details`] function to do just that.
+//!
 //! For our parser, the [`token_satisfies`] can fail if it doesn't find a digit, but as long
 //! as it finds at least one, then the parser should still succeed.
 //! We only have that pesky zero-digit case to worry about, so we can add a helpful error
@@ -233,10 +239,7 @@
 //! let front_number = token_satisfies(char::is_ascii_digit)
 //!     .map(|c| c.to_digit(10).unwrap())
 //!     .mult1()
-//!     .map_error(|mut e| {
-//!         e.set_details("front_number couldn't find any digits");
-//!         e
-//!     })
+//!     .error_details("front_number couldn't find any digits")
 //!     .map(|digs| {
 //!         let mut n = 0;
 //!         for d in digs {
@@ -274,10 +277,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .map_error(|mut e| {
-//!             e.set_details("front_number couldn't find any digits");
-//!             e
-//!         })
+//!         .error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -313,10 +313,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .map_error(|mut e| {
-//!             e.set_details("front_number couldn't find any digits");
-//!             e
-//!         })
+//!         .error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -352,10 +349,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .map_error(|mut e| {
-//!             e.set_details("front_number couldn't find any digits");
-//!             e
-//!         })
+//!         .error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -380,7 +374,7 @@
 //! computer science problem, one that stumped Turing, Church, and even von Neumann!
 //!
 //! I really ought to submit this feature to the Rust development team.
-//! The standard library could really make use of this-
+//! The standard library could really make use of-
 //! ```
 //! # // do you really need to see it working again?
 //! # fn parse_int(_input: &str) -> Option<u32> { Some(123) }
@@ -436,7 +430,8 @@ enum ErrorType<Toks> {
 /// to the number of parsed elements, while [`ParseError::empty_input`] requires no extra
 /// information at all.
 /// The two most common values to give a constructor are:
-/// * `details`: a `&str` providing extra human-readable information about this specific failure
+/// * `details`: a [`&str`] providing extra human-readable information about this specific
+///     failure
 /// * `loc` a `Toks` providing the input that the parser failed to parse from
 ///
 /// When providing `details`, the information should be relevant to the specific parser in
@@ -596,6 +591,8 @@ impl<Toks, T> ParseError<Toks, T> {
     }
 
     /// Overwrites the specific details of this failure.
+    ///
+    /// See also: [`error_details`], [`map_error`].
     pub fn set_details(&mut self, msg: &str) {
         self.details = Some(msg.to_owned());
     }
@@ -650,10 +647,10 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// If this returns `true`, a parser should not attempt to recover from this error.
     /// This is because the parsing will have failed not due to parser failure, but by being
-    /// interrupted by another class of error that should be handled
-    /// outside of the parser chain.
+    /// interrupted by another class of error that should be handled outside of the parser
+    /// chain.
     ///
-    /// See also: [`Parser::map_error`].
+    /// See also: [`ParseError::other`].
     pub fn caused_by_other(&self) -> bool {
         matches!(self.error_type, ErrorType::Other { .. })
     }
@@ -1072,6 +1069,16 @@ where
         F: Fn(ParseError<Toks, T>) -> ParseError<Toks, T> + 'a,
     {
         map_error(self, f)
+    }
+
+    /// Method version of [`error_details`].
+    fn error_details(self, details: &'a str) -> impl Parser<'a, Toks, T, A>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+    {
+        error_details(self, details)
     }
 
     /// Method version of [`and_then`].
@@ -1603,7 +1610,7 @@ where
 /// outside of the parser chain. However, this function does not prohibit the creation of
 /// such error values.
 ///
-/// See also: [`ParseError`].
+/// See also: [`ParseError`], [`error_details`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, ParseError, token};
@@ -1641,6 +1648,38 @@ where
         }
     };
     move |input| p.parse(input).map_err(&map_f)
+}
+
+/// Changes the provided parser's error details to the provided [`&str`].
+///
+/// This method provides a convenient option for error customization when all that needs
+/// to be altered is the details message.
+///
+/// **Note:** this function explicitly prohibits the modification of error values
+/// created with the [`ParseError::other`] function, as such errors were caused by factors
+/// outside of the parser chain.
+///
+/// See also: [`ParseError`], [`map_error`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let p = token('a').error_details("custom details");
+///
+/// let e = p.parse("b").unwrap_err();
+///
+/// assert_eq!(Some("custom details"), e.get_details());
+/// ```
+pub fn error_details<'a, Toks, T, A, P>(p: P, details: &'a str) -> impl Parser<'a, Toks, T, A>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    P: Parser<'a, Toks, T, A> + 'a,
+{
+    map_error(p, |mut e| {
+        e.set_details(details);
+        e
+    })
 }
 
 /// Creates a parser that always succeeds and performs no meaningful operations.
@@ -3280,6 +3319,18 @@ mod tests {
 
         assert_eq!(("", 'a'), p.parse("a").unwrap());
         assert_eq!(expected, p.parse("b").unwrap_err().to_string());
+    }
+
+    #[test]
+    fn test_error_details() {
+        let p = token('a');
+        let q = token('a').error_details("custom details");
+
+        let e1 = p.parse("b").unwrap_err();
+        let e2 = q.parse("b").unwrap_err();
+
+        assert_eq!(Some("custom details"), e2.get_details());
+        assert_ne!(e1.get_details(), e2.get_details());
     }
 
     p_test!(
