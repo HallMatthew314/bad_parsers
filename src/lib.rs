@@ -3031,9 +3031,20 @@ where
     }
 }
 
+pub fn broken_on_purpose() -> u32 {
+    let x = thebestnumberever;
+    x
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ci_test_broken_on_purpose() {
+        let x = broken_on_purpose();
+        assert_eq!(5, x);
+    }
 
     #[test]
     fn tokens_take_one_str() {
