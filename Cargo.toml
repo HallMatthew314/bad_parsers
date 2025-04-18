@@ -1,6 +1,14 @@
 [package]
 name = "bad_parsers"
-version = "0.1.0"
+version = "0.1.0-unstable"
+authors = ["Matthew Hall"]
 edition = "2024"
+description = "A parser combinator library written by myself, for myself"
+readme = "README.md"
+repository = "https://github.com/HallMatthew314/bad_parsers"
+license = "GPL-3.0"
+keywords = ["parser", "parser-generator", "parser-combinator", "bad"]
+categories = ["parsing"]
 
 [dependencies]
+# none! :D
