@@ -7,7 +7,6 @@ description = "A parser combinator library written by myself, for myself"
 readme = "README.md"
 repository = "https://github.com/HallMatthew314/bad_parsers"
 license = "GPL-3.0"
-license-file = "LICENSE"
 keywords = ["parser", "parser-generator", "parser-combinator", "bad"]
 categories = ["parsing"]
 
