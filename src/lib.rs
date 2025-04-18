@@ -3032,7 +3032,7 @@ where
 }
 
 pub fn broken_on_purpose() -> u32 {
-    let x = thebestnumberever;
+    let x = 42; // i think it was this one?
     x
 }
 
