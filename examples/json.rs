@@ -227,6 +227,24 @@ fn json_array<'a>() -> impl Parser<'a, &'a str, char, Json> {
     arr_body.between(open, close).convert()
 }
 
+// Implementation choice: duplicate object keys will be handled
+// according to ECMA-262: "In the case where there are duplicate
+// name Strings within an object, lexically preceding values
+// for the same key shall be overwritten."
+// This is also the current behavior for HashMap::from([(K, V); const N])
+// as well as HashMap::from_iter(), so this behavior should be implemented for free.
+fn json_object<'a>() -> impl Parser<'a, &'a str, char, Json> {
+    let member = string_literal()
+        .left(token(':').within(ws()))
+        .plus(lazy(json_value).boxed());
+    let obj_body = comma_delimited(member);
+    let open = token('{').left(ws());
+    let close = ws().right(token('}'));
+    obj_body.between(open, close).map(|kvs| {
+        HashMap::from_iter(kvs.into_iter()).into()
+    })
+}
+
 fn json_value<'a>() -> impl Parser<'a, &'a str, char, Json> {
     first_of![
         json_null(),
@@ -234,13 +252,16 @@ fn json_value<'a>() -> impl Parser<'a, &'a str, char, Json> {
         json_number(),
         json_string(),
         json_array(),
+        json_object(),
     ]
 }
 
 fn main() {
     println!("{:?}", json_null().parse("null"));
+    
     println!("{:?}", json_bool().parse("true"));
     println!("{:?}", json_bool().parse("false"));
+    
     println!("{:?}", json_number().parse("0"));
     println!("{:?}", json_number().parse("-0"));
     println!("{:?}", json_number().parse("123450"));
@@ -253,6 +274,7 @@ fn main() {
     println!("{:?}", json_number().parse("1e+5"));
     println!("{:?}", json_number().parse("1.0e-5"));
     println!("{:?}", json_number().parse("1e-5"));
+    
     println!("{:?}", json_string().parse("\"\"")); // empty string
     println!("{:?}", json_string().parse(r#""a string""#));
     // the codepoint literals should become "greek capital letter sigma" (Σ)
@@ -267,30 +289,51 @@ fn main() {
     }
     println!("{:?}", json_array().parse("[]"));
     println!("{:?}", json_array().parse("[  ]"));
-    println!("{:?}", json_array().parse("[ null,]"));
+    println!("{:?}", json_array().parse("[ null]"));
     println!("{:?}", json_array().parse("[true, false ]"));
     println!("{:?}", json_array().parse("[1, 2, 3, -4.5, 1e2]"));
     println!("{:?}", json_array().parse("[ \"strings\", [\"in\"], [\"nested\",\"arrays\"] ]"));
-    // Implementation choice: duplicate object keys will be handled
-    // according to ECMA-262: "In the case where there are duplicate
-    // name Strings within an object, lexically preceding values
-    // for the same key shall be overwritten."
-    // This is also the current behavior for HashMap::from([(K, V); const N])
-    // as well as HashMap::from_iter(), so this should be implemented for free.
-    let test_map = HashMap::<&str, i32>::from_iter(vec![
-        ("alpha", 1),
-        ("beta", 2),
-        ("gamma", 3),
-        ("alpha", 4),
-        ("epsilon", 5),
-        ("alpha", 6),
-    ].into_iter());
-    println!("{:?}", test_map);
+    
+    println!("{:?}", json_object().parse("{}"));
+    println!("{:?}", json_object().parse("{  }"));
+    println!("{:?}", json_object().parse("{\"foo\" : null}"));
+    println!("{:?}", json_object().parse("{ \"first\":{\"one\": 1}, \"second\": {\"two_i\":2, \"two_f\": 2.0} }"));
 
-    let test_hex1 = u32::from_str_radix("1AA5", 16).unwrap();
-    let test_hex2 = u32::from_str_radix("1aA5", 16).unwrap();
-    let test_hex3 = u32::from_str_radix("1Aa5", 16).unwrap();
-    let test_hex4 = u32::from_str_radix("1aa5", 16).unwrap();
-    println!("{}\n{}\n{}\n{}", test_hex1, test_hex2, test_hex3, test_hex4);
+    println!("{:?}", json_value().parse("null"));
+    println!("{:?}", json_value().parse("true"));
+    println!("{:?}", json_value().parse("109"));
+    println!("{:?}", json_value().parse("-98765.4e-4"));
+    println!("{:?}", json_value().parse("\"strings with \\\" escapes\""));
+    println!("{:?}", json_value().parse("[]"));
+    println!("{:?}", json_value().parse("[null, 1, true, -3.4]"));
+    println!("{:?}", json_value().parse("{ \"objects\": null, \"containing\": false, \"all\" :23.45, \"of\" : \"the\", \"different\": [\"data\", \"types\"], \"including\":{\"other\":\"objects\"} }"));
+    let final_boss = r#"{
+        "nulls": null,
+        "bools": [true, false],
+        "ints": {
+            "zero": 0,
+            "positive": 56789,
+            "negative": -1234
+        },
+        "floats": {
+            "zeroes": [0.0, -0e1],
+            "positive": 12340.56789,
+            "negative": -98765.04321
+        },
+        "strings": "新しい日の誕生",
+        "funkier strings": "weird begins > \"\\\/\r\n\u03a3\f _\b \t< weird ends",
+        "nesting": [
+            {"child1": 1},
+            {"child2" :2},
+            {"child3" : 3},
+            {"children456":[4,5,6]}
+        ],
+        "matrix": [
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9]
+        ]
+    }"#;
+    println!("{:?}", json_object().parse(final_boss));
 }
 
