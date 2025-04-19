@@ -7,7 +7,8 @@ use bad_parsers::{Tokens, Parser, ParseError, lazy, span_string_char, string, to
 
 // JSON is being parsed according to the grammar at: https://www.json.org/json-en.html
 
-#[derive(Debug)]
+#[allow(dead_code)]
+#[derive(Debug, PartialEq)]
 enum Json {
     Null,
     Bool(bool),
@@ -257,56 +258,7 @@ fn json_value<'a>() -> impl Parser<'a, &'a str, char, Json> {
 }
 
 fn main() {
-    println!("{:?}", json_null().parse("null"));
-    
-    println!("{:?}", json_bool().parse("true"));
-    println!("{:?}", json_bool().parse("false"));
-    
-    println!("{:?}", json_number().parse("0"));
-    println!("{:?}", json_number().parse("-0"));
-    println!("{:?}", json_number().parse("123450"));
-    println!("{:?}", json_number().parse("-67890"));
-    println!("{:?}", json_number().parse("0.0"));
-    println!("{:?}", json_number().parse("-0.0"));
-    println!("{:?}", json_number().parse("123.450"));
-    println!("{:?}", json_number().parse("-67.890"));
-    println!("{:?}", json_number().parse("1.0e5"));
-    println!("{:?}", json_number().parse("1e+5"));
-    println!("{:?}", json_number().parse("1.0e-5"));
-    println!("{:?}", json_number().parse("1e-5"));
-    
-    println!("{:?}", json_string().parse("\"\"")); // empty string
-    println!("{:?}", json_string().parse(r#""a string""#));
-    // the codepoint literals should become "greek capital letter sigma" (Σ)
-    let complicated_string = r#""a\r\n \u03a3tring\"\fwith \\ \/e\u03A3caped\tcharacters_\b""#;
-    match json_string().parse(complicated_string) {
-        Err(e) => println!("{:?}", e),
-        ok => {
-            println!("{:?}", ok);
-            let Ok((_, Json::String(s))) = ok else { panic!("shut up rust"); };
-            println!("as rendered by rust:\n{}", s);
-        }
-    }
-    println!("{:?}", json_array().parse("[]"));
-    println!("{:?}", json_array().parse("[  ]"));
-    println!("{:?}", json_array().parse("[ null]"));
-    println!("{:?}", json_array().parse("[true, false ]"));
-    println!("{:?}", json_array().parse("[1, 2, 3, -4.5, 1e2]"));
-    println!("{:?}", json_array().parse("[ \"strings\", [\"in\"], [\"nested\",\"arrays\"] ]"));
-    
-    println!("{:?}", json_object().parse("{}"));
-    println!("{:?}", json_object().parse("{  }"));
-    println!("{:?}", json_object().parse("{\"foo\" : null}"));
-    println!("{:?}", json_object().parse("{ \"first\":{\"one\": 1}, \"second\": {\"two_i\":2, \"two_f\": 2.0} }"));
 
-    println!("{:?}", json_value().parse("null"));
-    println!("{:?}", json_value().parse("true"));
-    println!("{:?}", json_value().parse("109"));
-    println!("{:?}", json_value().parse("-98765.4e-4"));
-    println!("{:?}", json_value().parse("\"strings with \\\" escapes\""));
-    println!("{:?}", json_value().parse("[]"));
-    println!("{:?}", json_value().parse("[null, 1, true, -3.4]"));
-    println!("{:?}", json_value().parse("{ \"objects\": null, \"containing\": false, \"all\" :23.45, \"of\" : \"the\", \"different\": [\"data\", \"types\"], \"including\":{\"other\":\"objects\"} }"));
     let final_boss = r#"{
         "nulls": null,
         "bools": [true, false],
@@ -337,3 +289,194 @@ fn main() {
     println!("{:?}", json_object().parse(final_boss));
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! assert_err {
+        ($e:expr) => {
+            assert!($e.is_err());
+        };
+    }
+
+    #[test]
+    fn example_json_test_null() {
+        let p = json_null();
+
+        assert_eq!(("", Json::Null), p.parse("null").unwrap());
+        assert_eq!(("_extra", Json::Null), p.parse("null_extra").unwrap());
+
+        assert_err!(p.parse(""));
+        assert_err!(p.parse("nUll"));
+        assert_err!(p.parse("nil"));
+        assert_err!(p.parse("Null"));
+    }
+
+    #[test]
+    fn example_json_test_bool() {
+        let p = json_bool();
+
+        assert_eq!(("", Json::Bool(true)), p.parse("true").unwrap());
+        assert_eq!(("", Json::Bool(false)), p.parse("false").unwrap());
+        assert_eq!(("_extra", Json::Bool(true)), p.parse("true_extra").unwrap());
+        assert_eq!(("_extra", Json::Bool(false)), p.parse("false_extra").unwrap());
+
+        assert_err!(p.parse(""));
+        assert_err!(p.parse("frue"));
+        assert_err!(p.parse("tralse"));
+        assert_err!(p.parse("False"));
+        assert_err!(p.parse("True"));
+    }
+
+    #[test]
+    fn example_json_test_number() {
+        let p = json_number();
+
+        assert_eq!(("", Json::Int(0)), p.parse("0").unwrap());
+        assert_eq!(("", Json::Int(0)), p.parse("-0").unwrap());
+        assert_eq!(("", Json::Int(123450)), p.parse("123450").unwrap());
+        assert_eq!(("", Json::Int(-67890)), p.parse("-67890").unwrap());
+
+        assert_eq!(("_450", Json::Int(123)), p.parse("123_450").unwrap());
+        assert_eq!(("_450.678", Json::Int(123)), p.parse("123_450.678").unwrap());
+
+        assert_eq!(("", Json::Float(0.0)), p.parse("0.0").unwrap());
+        assert_eq!(("", Json::Float(-0.0)), p.parse("-0.0").unwrap());
+        
+        assert_eq!(("", Json::Float(12345.06789)), p.parse("12345.06789").unwrap());
+        assert_eq!(("", Json::Float(-12345.06789)), p.parse("-12345.06789").unwrap());
+
+        // exhaustive format checks, '2' added to end of all patterns
+        // with decimal point
+        assert_eq!(("", Json::Float(12.342)), p.parse("12.342").unwrap());
+        assert_eq!(("", Json::Float(-12.342)), p.parse("-12.342").unwrap());
+        assert_eq!(("", Json::Float(1234.0)), p.parse("12.34e2").unwrap());
+        assert_eq!(("", Json::Float(-1234.0)), p.parse("-12.34e2").unwrap());
+        assert_eq!(("", Json::Float(1234.0)), p.parse("12.34E2").unwrap());
+        assert_eq!(("", Json::Float(-1234.0)), p.parse("-12.34E2").unwrap());
+        assert_eq!(("+2", Json::Float(12.34)), p.parse("12.34+2").unwrap());
+        assert_eq!(("+2", Json::Float(-12.34)), p.parse("-12.34+2").unwrap());
+        assert_eq!(("", Json::Float(1234.0)), p.parse("12.34e+2").unwrap());
+        assert_eq!(("", Json::Float(-1234.0)), p.parse("-12.34e+2").unwrap());
+        assert_eq!(("", Json::Float(1234.0)), p.parse("12.34E+2").unwrap());
+        assert_eq!(("", Json::Float(-1234.0)), p.parse("-12.34E+2").unwrap());
+        assert_eq!(("-2", Json::Float(12.34)), p.parse("12.34-2").unwrap());
+        assert_eq!(("-2", Json::Float(-12.34)), p.parse("-12.34-2").unwrap());
+        assert_eq!(("", Json::Float(0.1234)), p.parse("12.34e-2").unwrap());
+        assert_eq!(("", Json::Float(-0.1234)), p.parse("-12.34e-2").unwrap());
+        assert_eq!(("", Json::Float(0.1234)), p.parse("12.34E-2").unwrap());
+        assert_eq!(("", Json::Float(-0.1234)), p.parse("-12.34E-2").unwrap());
+        //without decimal point
+        assert_eq!(("", Json::Int(12342)), p.parse("12342").unwrap());
+        assert_eq!(("", Json::Int(-12342)), p.parse("-12342").unwrap());
+        assert_eq!(("", Json::Float(123400.0)), p.parse("1234e2").unwrap());
+        assert_eq!(("", Json::Float(-123400.0)), p.parse("-1234e2").unwrap());
+        assert_eq!(("", Json::Float(123400.0)), p.parse("1234E2").unwrap());
+        assert_eq!(("", Json::Float(-123400.0)), p.parse("-1234E2").unwrap());
+        assert_eq!(("+2", Json::Int(1234)), p.parse("1234+2").unwrap());
+        assert_eq!(("+2", Json::Int(-1234)), p.parse("-1234+2").unwrap());
+        assert_eq!(("", Json::Float(123400.0)), p.parse("1234e+2").unwrap());
+        assert_eq!(("", Json::Float(-123400.0)), p.parse("-1234e+2").unwrap());
+        assert_eq!(("", Json::Float(123400.0)), p.parse("1234E+2").unwrap());
+        assert_eq!(("", Json::Float(-123400.0)), p.parse("-1234E+2").unwrap());
+        assert_eq!(("-2", Json::Int(1234)), p.parse("1234-2").unwrap());
+        assert_eq!(("-2", Json::Int(-1234)), p.parse("-1234-2").unwrap());
+        assert_eq!(("", Json::Float(12.34)), p.parse("1234e-2").unwrap());
+        assert_eq!(("", Json::Float(-12.34)), p.parse("-1234e-2").unwrap());
+        assert_eq!(("", Json::Float(12.34)), p.parse("1234E-2").unwrap());
+        assert_eq!(("", Json::Float(-12.34)), p.parse("-1234E-2").unwrap());
+
+        // only 'zero' values can begin their whole component with zero:
+        assert_err!(p.parse("01"));
+        assert_err!(p.parse("01.0"));
+        assert_err!(p.parse("-01"));
+        assert_err!(p.parse("-01.0e4"));
+
+        // correct handling of values out of range of i64
+        let i64min_str = "-9223372036854775808";
+        assert_eq!(("", Json::Int(-9_223_372_036_854_775_808i64)), p.parse(i64min_str).unwrap());
+        let i64min_minus1_str = "-9223372036854775809";
+        assert_err!(p.parse(i64min_minus1_str));
+        assert_err!(p.parse("-9999999999999999999999999999999999999999999999999"));
+        let i64max_str = "9223372036854775807";
+        assert_eq!(("", Json::Int(9_223_372_036_854_775_807i64)), p.parse(i64max_str).unwrap());
+        let i64max_plus1_str = "9223372036854775808";//-1.7976931348623157E+308f64
+        assert_err!(p.parse(i64max_plus1_str));
+        assert_err!(p.parse("9999999999999999999999999999999999999999999999999"));
+
+        // TODO: test extreme values of f64
+    }
+
+    #[test]
+    fn example_json_test_string() {
+        let p = json_string();
+
+        assert_eq!(("", Json::String("".into())), p.parse("\"\"").unwrap());
+        assert_eq!(("", Json::String("foo".into())), p.parse("\"foo\"").unwrap());
+        assert_eq!(("extra", Json::String("foo".into())), p.parse("\"foo\"extra").unwrap());
+
+        assert_eq!(("", Json::String("text with \" some \\ escapes".into())), p.parse("\"text with \\\" some \\\\ escapes\"").unwrap());
+
+        // every (supported) escape sequence
+        assert_eq!(("", Json::String("\\".into())), p.parse(r#""\\""#).unwrap());
+        assert_eq!(("", Json::String("/".into())), p.parse(r#""\/""#).unwrap());
+        assert_eq!(("", Json::String("\"".into())), p.parse(r#""\"""#).unwrap());
+        assert_eq!(("", Json::String("\u{0008}".into())), p.parse(r#""\b""#).unwrap());
+        assert_eq!(("", Json::String("\u{000C}".into())), p.parse(r#""\f""#).unwrap());
+        assert_eq!(("", Json::String("\n".into())), p.parse(r#""\n""#).unwrap());
+        assert_eq!(("", Json::String("\r".into())), p.parse(r#""\r""#).unwrap());
+        assert_eq!(("", Json::String("\t".into())), p.parse(r#""\t""#).unwrap());
+        // unicode codepoints
+        assert_eq!(("", Json::String("A".into())), p.parse(r#""\u0041""#).unwrap());
+        assert_eq!(("", Json::String("Σ".into())), p.parse(r#""\u03a3""#).unwrap());
+        assert_eq!(("", Json::String("Σ".into())), p.parse(r#""\u03A3""#).unwrap());
+
+        // un-escaped control characters
+        assert_err!(p.parse("\"\0\""));
+        assert_err!(p.parse("\"\n\""));
+        assert_err!(p.parse("\"\u{1B}\""));
+
+        // invalid escape sequences
+        assert_err!(p.parse(r#""\""#));
+        assert_err!(p.parse(r#""\j""#));
+        assert_err!(p.parse(r#""\0""#));
+        assert_err!(p.parse(r#""\xab""#));
+
+        // invalid unicode codepoints
+        assert_err!(p.parse(r#""\uD800""#));
+        assert_err!(p.parse(r#""\uDFFF""#));
+        assert_err!(p.parse(r#""\uDE01""#));
+    }
+
+    /*
+    #[test]
+    fn example_json_test_array() {
+        assert_eq!(("", Json::Cons(_)), p.parse("[]").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("[  ]").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("[ null]").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("[true, false ]").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("[1, 2, 3, -4.5, 1e2]").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("[ \"strings\", [\"in\"], [\"nested\",\"arrays\"] ]").unwrap());
+    }
+
+    #[test]
+    fn example_json_test_object() {
+        assert_eq!(("", Json::Cons(_)), p.parse("{}").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("{  }").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("{\"foo\" : null}").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("{ \"first\":{\"one\": 1}, \"second\": {\"two_i\":2, \"two_f\": 2.0} }").unwrap());
+    }
+
+    #[test]
+    fn example_json_test_value() {
+        assert_eq!(("", Json::Cons(_)), p.parse("null").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("true").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("109").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("-98765.4e-4").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("\"strings with \\\" escapes\"").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("[]").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("[null, 1, true, -3.4]").unwrap());
+        assert_eq!(("", Json::Cons(_)), p.parse("{ \"objects\": null, \"containing\": false, \"all\" :23.45, \"of\" : \"the\", \"different\": [\"data\", \"types\"], \"including\":{\"other\":\"objects\"} }").unwrap());
+    }
+    */
+}
