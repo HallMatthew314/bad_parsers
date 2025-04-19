@@ -3,7 +3,7 @@ extern crate bad_parsers;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use bad_parsers::{Tokens, Parser, ParseError, span_string_char, string, token, token_satisfies, first_of};
+use bad_parsers::{Tokens, Parser, ParseError, lazy, span_string_char, string, token, token_satisfies, first_of};
 
 // JSON is being parsed according to the grammar at: https://www.json.org/json-en.html
 
@@ -194,12 +194,46 @@ fn json_string<'a>() -> impl Parser<'a, &'a str, char, Json> {
     string_literal().convert()
 }
 
+// using the definition of whitespace found in the spec
+fn is_whitespace(c: &char) -> bool {
+    matches!(c, '\u{20}' | '\u{0D}' | '\u{0A}' | '\u{09}')
+}
+
+fn ws<'a>() -> impl Parser<'a, &'a str, char, ()> {
+    token_satisfies(is_whitespace).mult().ignore()
+}
+
+// includes surrounding whitespace
+fn comma<'a>() -> impl Parser<'a, &'a str, char, ()> {
+    token(',').within(ws()).ignore()
+}
+
+// does not include trailing commas
+// does not include whitespace before the first element OR after the last element
+// DOES allow for empty lists
+fn comma_delimited<'a, T, P>(p: P) -> impl Parser<'a, &'a str, char, Vec<T>>
+where
+    T: 'a,
+    P: Parser<'a, &'a str, char, T> + 'a,
+{
+    p.sep_by(comma()).recover_default()
+}
+
+// spec does not support trailing commas for arrays
+fn json_array<'a>() -> impl Parser<'a, &'a str, char, Json> {
+    let arr_body = comma_delimited(lazy(json_value).boxed());
+    let open = token('[').left(ws());
+    let close = ws().right(token(']'));
+    arr_body.between(open, close).convert()
+}
+
 fn json_value<'a>() -> impl Parser<'a, &'a str, char, Json> {
     first_of![
         json_null(),
         json_bool(),
         json_number(),
         json_string(),
+        json_array(),
     ]
 }
 
@@ -231,6 +265,12 @@ fn main() {
             println!("as rendered by rust:\n{}", s);
         }
     }
+    println!("{:?}", json_array().parse("[]"));
+    println!("{:?}", json_array().parse("[  ]"));
+    println!("{:?}", json_array().parse("[ null,]"));
+    println!("{:?}", json_array().parse("[true, false ]"));
+    println!("{:?}", json_array().parse("[1, 2, 3, -4.5, 1e2]"));
+    println!("{:?}", json_array().parse("[ \"strings\", [\"in\"], [\"nested\",\"arrays\"] ]"));
     // Implementation choice: duplicate object keys will be handled
     // according to ECMA-262: "In the case where there are duplicate
     // name Strings within an object, lexically preceding values
