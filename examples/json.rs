@@ -36,6 +36,12 @@ impl_json_from!(String, String);
 impl_json_from!(Vec<Json>, Array);
 impl_json_from!(HashMap<String, Json>, Object);
 
+impl From<&str> for Json {
+    fn from(value: &str) -> Self {
+        Json::String(value.to_owned())
+    }
+}
+
 fn json_null<'a>() -> impl Parser<'a, &'a str, char, Json> {
     // map instead of replace saves implementing clone for Json
     string("null").map(|_| Json::Null)
@@ -258,7 +264,6 @@ fn json_value<'a>() -> impl Parser<'a, &'a str, char, Json> {
 }
 
 fn main() {
-
     let final_boss = r#"{
         "nulls": null,
         "bools": [true, false],
@@ -448,17 +453,127 @@ mod tests {
         assert_err!(p.parse(r#""\uDE01""#));
     }
 
-    /*
     #[test]
     fn example_json_test_array() {
-        assert_eq!(("", Json::Cons(_)), p.parse("[]").unwrap());
-        assert_eq!(("", Json::Cons(_)), p.parse("[  ]").unwrap());
-        assert_eq!(("", Json::Cons(_)), p.parse("[ null]").unwrap());
-        assert_eq!(("", Json::Cons(_)), p.parse("[true, false ]").unwrap());
-        assert_eq!(("", Json::Cons(_)), p.parse("[1, 2, 3, -4.5, 1e2]").unwrap());
-        assert_eq!(("", Json::Cons(_)), p.parse("[ \"strings\", [\"in\"], [\"nested\",\"arrays\"] ]").unwrap());
+        let p = json_array();
+
+        assert_eq!(("", Json::Array(vec![])), p.parse("[]").unwrap());
+        assert_eq!(("", Json::Array(vec![])), p.parse("[  ]").unwrap());
+        assert_eq!(("extra", Json::Array(vec![])), p.parse("[  ]extra").unwrap());
+        assert_eq!(
+            ("", Json::Array(vec![Json::Null])),
+            p.parse("[ null]").unwrap()
+        );
+        assert_eq!(
+            ("", Json::Array(vec![Json::Bool(true), Json::Bool(false)])),
+            p.parse("[true, false ]").unwrap()
+        );
+        assert_eq!(
+            ("", Json::Array(vec![
+                Json::from(1),
+                Json::from(2),
+                Json::from(3),
+                Json::from(-4.5),
+                Json::from(1.0e2),
+            ])),
+            p.parse("[1, 2, 3, -4.5, 1e2]").unwrap()
+        );
+        assert_eq!(
+            ("", Json::Array(vec![
+                "strings".into(),
+                "in".into(),
+                "arrays".into(),
+            ])),
+            p.parse(r#"[ "strings", "in", "arrays" ]"#).unwrap()
+        );
+        assert_eq!(
+            ("", Json::Array(vec![
+                Json::from("we"),
+                Json::from(vec![Json::from("even")]),
+                Json::from(vec![
+                    Json::from(vec![
+                        Json::from("have"),
+                        Json::from(vec![
+                            Json::from("nested"),
+                            Json::from("arrays"),
+                        ]),
+                    ]),
+                ]),
+            ])),
+            p.parse(r#"[
+                "we",
+                [
+                    "even"
+                ],
+                [
+                    [
+                        "have",
+                        [
+                            "nested",
+                            "arrays"
+                        ]
+                    ]
+                ]
+            ]"#).unwrap()
+        );
+    
+        assert_eq!(
+            ("", Json::Array(vec![
+                Json::from(HashMap::from([
+                    ("objects".into(), "with".into()),
+                    ("multiple".into(), "keys".into()),
+                ])),
+                Json::from(HashMap::from([])),
+                Json::from(HashMap::from([("inside".into(), "arrays".into())])),
+            ])),
+            p.parse(r#"[
+                {"objects": "with", "multiple": "keys"},
+                {},
+                {"inside": "arrays"}
+            ]"#).unwrap()
+        );
+
+        // internal whitespace is fine
+        assert_eq!(("", Json::Array(vec![])), p.parse("[ \t\n\r  ]").unwrap());
+        assert_eq!(("", Json::Array(vec![Json::Null])), p.parse("[null]").unwrap());
+        assert_eq!(("", Json::Array(vec![Json::Null])), p.parse("[ null]").unwrap());
+        assert_eq!(("", Json::Array(vec![Json::Null])), p.parse("[null ]").unwrap());
+        assert_eq!(("", Json::Array(vec![Json::Null])), p.parse("[    null   ]").unwrap());
+        
+        macro_rules! a {
+            () => {
+                Json::Array(vec![Json::Null, Json::Null])
+            };
+        }
+        assert_eq!(("", a!()), p.parse("[null,null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[null,null ]").unwrap());
+        assert_eq!(("", a!()), p.parse("[null, null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[null, null ]").unwrap());
+        assert_eq!(("", a!()), p.parse("[null ,null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[null ,null ]").unwrap());
+        assert_eq!(("", a!()), p.parse("[null , null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[null , null ]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null,null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null,null ]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null, null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null, null ]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null ,null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null ,null ]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null , null]").unwrap());
+        assert_eq!(("", a!()), p.parse("[ null , null ]").unwrap());
+
+        assert_err!(p.parse("[ bhsrlre ]"));
+        assert_err!(p.parse(r#"[ "oops\", "forgot the closing bracket" "#));
+        assert_err!(p.parse(r#" "forgot the opening bracket too" ]"#));
+        assert_err!(p.parse(r#" "are brackets even real?" "#));
+
+        // no trailing commas
+        assert_err!(p.parse("[ , ]"));
+        assert_err!(p.parse("[ 8, ]"));
+        assert_err!(p.parse("[8, 9, 10,]"));
     }
 
+    /*
     #[test]
     fn example_json_test_object() {
         assert_eq!(("", Json::Cons(_)), p.parse("{}").unwrap());
