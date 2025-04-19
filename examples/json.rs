@@ -130,6 +130,15 @@ fn json_number<'a>() -> impl Parser<'a, &'a str, char, Json> {
     }
 }
 
+fn extract_codepoint(text: &str) -> Option<(&str, char)> {
+    let (point_text, rest) = text.split_at_checked(4)?;
+    // note: from_str_radix(_, 16) allows for mixed-case hex literals,
+    // so no upper/lower case conversion is required
+    let u = u32::from_str_radix(point_text, 16).ok()?;
+    let c = char::try_from(u).ok()?;
+    Some((rest, c))
+}
+
 fn string_char<'a>()  -> impl Parser<'a, &'a str, char, char> {
     |input: &'a str| {
         if let Some(input2) = input.strip_prefix('\\') {
@@ -139,26 +148,12 @@ fn string_char<'a>()  -> impl Parser<'a, &'a str, char, char> {
                     input
                 )),
                 Some((input3, 'u')) => {
-                    let Some((point_text, input4)) = input3.split_at_checked(4) else {
-                        return Err(ParseError::no_parse(
+                    match extract_codepoint(input3) {
+                        Some((input4, c)) => Ok((input4, c)),
+                        None => Err(ParseError::no_parse(
                             "invalid codepoint literal",
-                            input
-                        ));
-                    };
-                    // note: from_str_radix(_, 16) allows for mixed-case hex literals,
-                    // so no upper/lower case conversion is required
-                    let Ok(u) = u32::from_str_radix(point_text, 16) else {
-                        return Err(ParseError::no_parse(
-                            "invalid codepoint literal",
-                            input
-                        ));
-                    };
-                    match char::try_from(u) {
-                        Err(_) => Err(ParseError::no_parse(
-                            "codepoint is valid, but the value is not allowed in Rust",
                             input
                         )),
-                        Ok(c) => Ok((input4, c)),
                     }
                 }
                 Some((input3, '\\')) => Ok((input3, '\\')),
