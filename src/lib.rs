@@ -2902,7 +2902,11 @@ where
     Toks: Tokens<T> + 'a,
     T: Clone + Debug + PartialEq + 'a,
 {
-    token_satisfies(move |t| *t == tok)
+    let msg = format!("couldn't find token: {:?}", tok);
+    token_satisfies(move |t| *t == tok).map_error(move |mut e| {
+        e.set_details(&format!("couldn't find token: {:?}", &msg));
+        e
+    })
 }
 
 /// Parses a literal string slice.
