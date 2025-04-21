@@ -21,7 +21,8 @@ nothing so far
 
 ### Fixed
 
-nothing so far
+- The functions `left`, `recover`, `recover_default`, `right`, and `trailing` no longer have
+    the `T: 'a` constraint.
 
 ### Changed
 
