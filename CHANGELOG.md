@@ -16,6 +16,7 @@ nothing so far
 - Changelog
 - Example: JSON parser
 - `ParseError.error_details`: a more convenient function for changing error details
+- `was_parsed` + method version: a combinator similar to `optional` that returns a boolean
 
 ### Fixed
 

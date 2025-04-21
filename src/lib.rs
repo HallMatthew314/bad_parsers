@@ -574,6 +574,7 @@ impl<Toks, T> ParseError<Toks, T> {
     /// * [`recover`]
     /// * [`recover_default`]
     /// * [`sep_by`]
+    /// * [`was_parsed`]
     pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
         Self {
             error_type: ErrorType::Other {
@@ -1179,6 +1180,16 @@ where
         A: 'a,
     {
         optional(self)
+    }
+
+    /// Method version of [`was_parsed`]
+    fn was_parsed(self) -> impl Parser<'a, Toks, T, bool>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+    {
+        was_parsed(self)
     }
 
     /// Method version of [`ensure`]
@@ -2139,6 +2150,43 @@ where
         Ok((rest, x)) => Ok((rest, Some(x))),
         Err(e) if e.caused_by_other() => Err(e),
         Err(_) => Ok((input, None)),
+    }
+}
+
+/// Returns whether or not the parser was successful, discarding the parsed value.
+///
+/// If `p` succeeds, the parser returns `true`.
+/// If `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
+/// returns `false`.
+///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return a `None` value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
+/// See also: [`optional`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let p = token('a').was_parsed();
+///
+/// assert_eq!(("", true), p.parse("a").unwrap());
+/// assert_eq!(("", false), p.parse("").unwrap());
+/// assert_eq!(("b", false), p.parse("b").unwrap());
+/// ```
+pub fn was_parsed<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, bool>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+{
+    move |input| match p.parse(input) {
+        Ok((input2, _)) => Ok((input2, true)),
+        Err(e) if e.caused_by_other() => Err(e),
+        Err(_) => Ok((input, false)),
     }
 }
 
@@ -3525,6 +3573,22 @@ mod tests {
             ("", ("", None)),
             ("b", ("b", None)),
             ("ba", ("ba", None)),
+        ],
+        vec![],
+    );
+
+    p_test!(
+        test_was_parsed,
+        &str,
+        bool,
+        token('a').was_parsed(),
+        vec![
+            ("a", ("", true)),
+            ("ab", ("b", true)),
+            ("abc", ("bc", true)),
+            ("", ("", false)),
+            ("b", ("b", false)),
+            ("ba", ("ba", false)),
         ],
         vec![],
     );
