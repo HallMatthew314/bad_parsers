@@ -1622,7 +1622,7 @@ where
 /// });
 ///
 /// // Fails with default error message
-/// let expected1 = "Parser was unsuccessful: predicate of ensure failed, Failed at: \"b\"";
+/// let expected1 = "Parser was unsuccessful: couldn't find token: \"couldn't find token: 'a'\", Failed at: \"b\"";
 /// let msg1 = p1.parse("b").unwrap_err().to_string();
 /// // Fails with custom error message
 /// let expected2 = "Parser was unsuccessful: custom message, Failed at: \"b\"";
@@ -2902,7 +2902,11 @@ where
     Toks: Tokens<T> + 'a,
     T: Clone + Debug + PartialEq + 'a,
 {
-    token_satisfies(move |t| *t == tok)
+    let msg = format!("couldn't find token: {:?}", tok);
+    token_satisfies(move |t| *t == tok).map_error(move |mut e| {
+        e.set_details(&format!("couldn't find token: {:?}", &msg));
+        e
+    })
 }
 
 /// Parses a literal string slice.
