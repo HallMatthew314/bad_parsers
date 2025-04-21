@@ -258,6 +258,11 @@ fn json_value<'a>() -> impl Parser<'a, &'a str, char, Json> {
     ]
 }
 
+fn main() {
+    let p = json_value();
+    assert!(p.parse("\"alright fine have a main function\"").is_ok());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
