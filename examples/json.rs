@@ -8,7 +8,7 @@ use bad_parsers::{
 };
 
 // JSON is being parsed according to the grammar at: https://www.json.org/json-en.html
-
+// It's not exactly produciton-ready, but it works well enough
 #[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 enum Json {
@@ -512,24 +512,7 @@ mod tests {
                     ]),]),
                 ])
             ),
-            p.parse(
-                r#"[
-                "we",
-                [
-                    "even"
-                ],
-                [
-                    [
-                        "have",
-                        [
-                            "nested",
-                            "arrays"
-                        ]
-                    ]
-                ]
-            ]"#
-            )
-            .unwrap()
+            p.parse(r#"["we",["even"],[["have",["nested","arrays"]]]]"#).unwrap()
         );
 
         assert_eq!(
