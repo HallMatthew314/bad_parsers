@@ -1156,7 +1156,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: Clone + 'a,
     {
         recover(self, value)
@@ -1167,7 +1166,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: Default + 'a,
     {
         recover_default(self)
@@ -1232,7 +1230,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: 'a,
         Q: Parser<'a, Toks, T, B> + 'a,
         B: 'a,
@@ -1245,7 +1242,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: 'a,
         Q: Parser<'a, Toks, T, B> + 'a,
         B: 'a,
@@ -1258,7 +1254,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: 'a,
         Q: Parser<'a, Toks, T, B> + 'a,
         B: 'a,
@@ -1536,6 +1531,46 @@ where
         self.or(other).boxed()
     }
 }
+
+// DEVELOPER NOTE: TOKEN LIFETIME QUIRK WHEN IMPLEMENTING PARSERS
+// Written 2025-04-21
+// For reasons I have not yet fully understood, some of the previous implementations
+// of these functions required that the token type `T` live for as long as
+// everythig else, despite few other functions needing this restriction.
+// Before being rewritten, the functions in question were: left, recover, recover_default,
+// right, and trailing.
+// My best guess is that their prior definitions in terms of other combinators somehow
+// introduced a complexity that the borrow-checker couldn't reason about on its own.
+// Example:
+// ```
+// {
+//     // prior implementation of `left`
+//     // this complains about lifetimes
+//     plus(p, q).map(|tup| tup.0)
+// }
+// {
+//     // fixed implementation of `left`
+//     // this doesn't complain about lifetimes
+//     move |input1| {
+//         let (input2, x) = p.parse(input1)?;
+//         let (input3, _) = p.parse(input2)?;
+//         Ok((input3, x))
+//     }
+// }
+// ```
+// I do not believe it was the specific functions being used that required this lifetime
+// constraint, as they themselves did not need it and worked just fine.
+//
+// What I'm trying to say is: if you encounter this issue when building a new combinator,
+// see if you're using another combinator already and eliminate it if you can.
+// It's not very DRY, but I am willing to sacrifice that so that use of the functions in
+// this library are less restricted.
+// Additionally, the requirements of the combinators are unlikely to definitionally
+// change in the future, so I would be surprised if this would cause any refactoring headaches
+// due to some kind of drastic change in Rust or the greater API of this library. (If it does,
+// then you probably have bigger problems than a lifetime constraint.)
+// In any case, rewriting the functions didn't break any tests, or even the JSON example
+// so this is done as far as I'm concerned.
 
 /// Creates a [`Parser`] that tries to parse with all of the argument parsers.
 ///
@@ -2088,11 +2123,15 @@ where
 pub fn recover<'a, Toks, T, A, P>(p: P, value: A) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO: figure out why rust complains about the lifetime here
+    T: Clone + Debug,
     A: Clone + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
-    or(p, succeed(value))
+    move |input1| match p.parse(input1) {
+        Ok((input2, x)) => Ok((input2, x)),
+        Err(e) if e.caused_by_other() => Err(e),
+        Err(_) => Ok((input1, value.clone())),
+    }
 }
 
 /// Returns a default value when the given parser fails.
@@ -2123,11 +2162,15 @@ where
 pub fn recover_default<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO: same lifetime oddity as recover
+    T: Clone + Debug,
     A: Default + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
-    or(p, succeed_default())
+    move |input1| match p.parse(input1) {
+        Ok((input2, x)) => Ok((input2, x)),
+        Err(e) if e.caused_by_other() => Err(e),
+        Err(_) => Ok((input1, A::default())),
+    }
 }
 
 /// Wraps the return value in an `Option`, allows parsing to continue on failure.
@@ -2367,13 +2410,17 @@ where
 pub fn left<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO also lifetime oddity, is it map()?
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
     B: 'a,
 {
-    map(plus(p, q), |tup| tup.0)
+    move |input1| {
+        let (input2, x) = p.parse(input1)?;
+        let (input3, _) = q.parse(input2)?;
+        Ok((input3, x))
+    }
 }
 
 /// Parses with two parsers in series, returns second value
@@ -2411,13 +2458,17 @@ where
 pub fn right<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO same as above
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
     B: 'a,
 {
-    map(plus(p, q), |tup| tup.1)
+    move |input1| {
+        let (input2, _) = p.parse(input1)?;
+        let (input3, y) = q.parse(input2)?;
+        Ok((input3, y))
+    }
 }
 
 /// Parses and returns the value of one parser, then optionally parses with another.
@@ -2460,18 +2511,19 @@ where
 pub fn trailing<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO: same lifetime quirk
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
     B: 'a,
 {
-    let q_optional = q.optional();
     move |input1| {
         let (input2, x) = p.parse(input1)?;
-        let (input3, _) = q_optional.parse(input2)?;
-
-        Ok((input3, x))
+        match q.parse(input2) {
+            Ok((input3, _)) => Ok((input3, x)),
+            Err(e) if e.caused_by_other() => Err(e),
+            Err(_) => Ok((input2, x)),
+        }
     }
 }
 
