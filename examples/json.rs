@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 extern crate bad_parsers;
 
 use std::collections::HashMap;
@@ -255,10 +256,6 @@ fn json_value<'a>() -> impl Parser<'a, &'a str, char, Json> {
         json_array(),
         json_object(),
     ]
-}
-
-fn main() {
-    println!("TODO: get rid of the main function");
 }
 
 #[cfg(test)]
