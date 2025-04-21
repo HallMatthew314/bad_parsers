@@ -574,6 +574,7 @@ impl<Toks, T> ParseError<Toks, T> {
     /// * [`recover`]
     /// * [`recover_default`]
     /// * [`sep_by`]
+    /// * [`trailing`]
     /// * [`was_parsed`]
     pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
         Self {
@@ -1250,6 +1251,19 @@ where
         B: 'a,
     {
         right(self, other)
+    }
+
+    /// Method version of [`trailing`]
+    fn trailing<Q, B>(self, other: Q) -> impl Parser<'a, Toks, T, A>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        T: 'a, // TODO: lifetime oddity
+        A: 'a,
+        Q: Parser<'a, Toks, T, B> + 'a,
+        B: 'a,
+    {
+        trailing(self, other)
     }
 
     /// Method version of [`in_range`]
@@ -2289,7 +2303,7 @@ where
 /// This combinator may also be expressed with the `+` operator if **both** `p` and `q` are
 /// [`BoxedParser`]s.
 ///
-/// See also: [`left`], [`right`].
+/// See also: [`left`], [`right`], [`trailing`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -2337,7 +2351,7 @@ where
 /// This combinator may also be expressed with the `<<` operator if **both** `p` and `q` are
 /// [`BoxedParser`]s.
 ///
-/// See also: [`plus`], [`right`].
+/// See also: [`plus`], [`right`], [`trailing`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -2381,7 +2395,7 @@ where
 /// This combinator may also be expressed with the `>>` operator if **both** `p` and `q` are
 /// [`BoxedParser`]s.
 ///
-/// See also: [`left`], [`plus`].
+/// See also: [`left`], [`plus`], [`trailing`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -2404,6 +2418,61 @@ where
     B: 'a,
 {
     map(plus(p, q), |tup| tup.1)
+}
+
+/// Parses and returns the value of one parser, then optionally parses with another.
+///
+/// This parser will first try to parse a value with `p`.
+/// If `p` fails, then the parser fails.
+/// If `p` succeeds, the parser will try to then parse a value with `q` (from the returned input
+/// from `p`).
+/// If `q` succeeds, the corresponding input is consumed but no extra value is returned.
+/// If `q` fails, nothing else happens.
+/// If either `p` or `q` fail, then the parser fails.
+///
+/// `p` must succeed before `q` can be run, but `q` is obviously allowed to fail.
+/// They must also both operate on the same input type, though they are free to have different
+/// return types.
+///
+/// When called directly, `p` will be used first and `q` second.
+/// When called as a [method of `Parser`](Parser::trailing), the receiving parser (the `self`)
+/// is used first and the `other` parser is used second.
+///
+/// **Note:** if `q` produces an error value created with the [`ParseError::other`] function,
+/// this parser will *not* return the already-parsed element from `p` and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
+/// See also: [`left`], [`plus`], [`right`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let p = token('a').trailing(token('b').convert::<u32>());
+///
+/// assert_eq!(("", 'a'), p.parse("ab").unwrap());
+/// assert_eq!(("t", 'a'), p.parse("at").unwrap());
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert!(p.parse("b").is_err());
+/// assert!(p.parse("ba").is_err());
+/// ```
+pub fn trailing<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug + 'a, // TODO: same lifetime quirk
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+    Q: Parser<'a, Toks, T, B> + 'a,
+    B: 'a,
+{
+    let q_optional = q.optional();
+    move |input1| {
+        let (input2, x) = p.parse(input1)?;
+        let (input3, _) = q_optional.parse(input2)?;
+
+        Ok((input3, x))
+    }
 }
 
 /// Parses with the given parser an amount of times based on the provided range.
@@ -3651,6 +3720,23 @@ mod tests {
             ("abc", ("c", 'b')),
         ],
         vec!["", "a", "b", "ba", "acb",],
+    );
+
+    p_test!(
+        test_trailing,
+        &str,
+        char,
+        token('a').trailing(token('b')),
+        vec![
+            ("ab", ("", 'a')),
+            ("a", ("", 'a')),
+            ("aba", ("a", 'a')),
+            ("abb", ("b", 'a')),
+            ("abc", ("c", 'a')),
+            ("aca", ("ca", 'a')),
+            ("acb", ("cb", 'a')),
+        ],
+        vec!["", "b", "ba"],
     );
 
     type PR = (Bound<usize>, Bound<usize>);
