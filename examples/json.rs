@@ -107,12 +107,11 @@ fn json_number<'a>() -> impl Parser<'a, &'a str, char, Json> {
             match f64::from_str(&full_string) {
                 Ok(f) => Ok((inp, Json::Float(f))),
                 Err(parse_float_error) => {
-                    let mut e = ParseError::other(parse_float_error, inp);
-                    e.set_details(&format!(
+                    let details = &format!(
                         "successfully parsed the float ({}), but the type conversion failed",
                         full_string
-                    ));
-                    Err(e)
+                    );
+                    Err(ParseError::other(details, inp, parse_float_error))
                 }
             }
         } else {
@@ -121,12 +120,11 @@ fn json_number<'a>() -> impl Parser<'a, &'a str, char, Json> {
             match i64::from_str(&full_string) {
                 Ok(i) => Ok((inp, Json::Int(i))),
                 Err(parse_int_error) => {
-                    let mut e = ParseError::other(parse_int_error, inp);
-                    e.set_details(&format!(
+                    let details = &format!(
                         "successfully parsed the int ({}), but the type conversion failed",
                         full_string
-                    ));
-                    Err(e)
+                    );
+                    Err(ParseError::other(details, inp, parse_int_error))
                 }
             }
         }
@@ -167,7 +165,9 @@ fn string_char<'a>() -> impl Parser<'a, &'a str, char, char> {
             }
         } else {
             match input.take_one() {
-                None => Err(ParseError::empty_input()),
+                None => Err(ParseError::empty_input(
+                    "expected string literal to continue, but got end of input"
+                )),
                 Some((_inp2, '"')) => Err(ParseError::no_parse(
                     "unescaped double-quotes are not valid string body characters",
                     input,

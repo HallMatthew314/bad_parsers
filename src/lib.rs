@@ -251,7 +251,7 @@
 //!
 //! assert_eq!(("", 123), front_number.parse("123").unwrap());
 //!
-//! let expected = "Parser needed to parse 1 elements, but only parsed 0: front_number couldn't find any digits, Failed at: \"foo\"";
+//! let expected = "Parser needed to parse 1 elements, but only parsed 0 (front_number couldn't find any digits), Failed at: \"foo\"";
 //! assert_eq!(expected.to_string(), front_number.parse("foo").unwrap_err().to_string());
 //! ```
 //! Now that we've modified the details of the original [`ParseError`], the parser's error
@@ -391,25 +391,17 @@ use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
 #[derive(Debug)]
-enum ErrorType<Toks> {
-    NoParse {
-        loc: Toks,
-    },
+enum ErrorType {
+    NoParse,
     EmptyInput,
-    UnexpectedInput {
-        loc: Toks,
-    },
-    Flunk {
-        loc: Toks,
-    },
+    UnexpectedInput,
+    Flunk,
     NotEnough {
-        loc: Toks,
         needed: usize,
         got: usize,
     },
     Other {
         cause: Box<dyn std::error::Error>,
-        loc: Toks,
     },
 }
 
@@ -446,48 +438,51 @@ enum ErrorType<Toks> {
 ///
 /// let digit = token_satisfies(char::is_ascii_digit)
 ///     .map_error(|e: ParseError<&str, char>| {
-///         if let Some(input) = e.get_loc_non_empty() {
+///         if let Some(input) = e.loc_non_empty() {
 ///             let c = input.take_one().unwrap().1;
 ///             ParseError::no_parse(
 ///                 &format!("expected a digit, but found: {:?}", c),
 ///                 input,
 ///             )
 ///         } else {
-///             ParseError::empty_input()
+///             ParseError::empty_input("expected a digit, found nothing")
 ///         }
 ///     });
 /// ```
 #[derive(Debug)]
 pub struct ParseError<Toks, T> {
-    error_type: ErrorType<Toks>,
-    details: Option<String>,
+    error_type: ErrorType,
+    details: String,
+    loc: Option<Toks>,
     _phantom: PhantomData<T>,
 }
 
 impl<Toks, T> ParseError<Toks, T> {
-    /// Signals that a parser has failed to parse due to the input ending sooner than expected.
-    pub fn empty_input() -> Self {
+    #[doc(hidden)]
+    fn construct_generic(error_type: ErrorType, details: &str, loc: Option<Toks>) -> Self {
         Self {
-            error_type: ErrorType::EmptyInput,
-            details: None,
+            error_type,
+            details: details.to_owned(),
+            loc,
             _phantom: PhantomData,
         }
+    }
+
+    /// Signals that a parser has failed to parse due to the input ending sooner than expected.
+    pub fn empty_input(details: &str) -> Self {
+        Self::construct_generic(ErrorType::EmptyInput, details, None)
     }
 
     /// Signals that a parser has failed to parse because it expected the input to be empty,
     /// but it was not.
     ///
     /// See also: [`eof`].
-    pub fn unexpected_input(loc: Toks) -> Self
+    pub fn unexpected_input(details: &str, loc: Toks) -> Self
     where
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::UnexpectedInput { loc },
-            details: None,
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(ErrorType::UnexpectedInput, details, Some(loc))
     }
 
     /// Signals that a parser has failed intentionally.
@@ -498,11 +493,7 @@ impl<Toks, T> ParseError<Toks, T> {
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::Flunk { loc },
-            details: Some(details.to_owned()),
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(ErrorType::Flunk, details, Some(loc))
     }
 
     /// Signals that a parser has failed to parse whatever it was trying to parse.
@@ -519,11 +510,7 @@ impl<Toks, T> ParseError<Toks, T> {
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::NoParse { loc },
-            details: Some(details.to_owned()),
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(ErrorType::NoParse, details, Some(loc))
     }
 
     /// Signals that a parser has failed due to being unable to parse as many elements as it
@@ -533,16 +520,16 @@ impl<Toks, T> ParseError<Toks, T> {
     /// parser* in order to collect multiple elements.
     ///
     /// See also: [`at_least`], [`in_range`], [`mult1`], [`sep_by`].
-    pub fn not_enough(loc: Toks, needed: usize, got: usize) -> Self
+    pub fn not_enough(details: &str, loc: Toks, needed: usize, got: usize) -> Self
     where
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::NotEnough { loc, needed, got },
-            details: None,
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(
+            ErrorType::NotEnough { needed, got },
+            details,
+            Some(loc),
+        )
     }
 
     /// Signals that a parser has failed due to external factors.
@@ -576,27 +563,27 @@ impl<Toks, T> ParseError<Toks, T> {
     /// * [`sep_by`]
     /// * [`trailing`]
     /// * [`was_parsed`]
-    pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
-        Self {
-            error_type: ErrorType::Other {
-                cause: Box::new(cause),
-                loc,
-            },
-            details: None,
-            _phantom: PhantomData,
-        }
+    pub fn other<E>(details: &str, loc: Toks, cause: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self::construct_generic(
+            ErrorType::Other { cause: Box::new(cause) },
+            details,
+            Some(loc)
+        )
     }
 
-    /// Returns the specific details of this failure, if there are any.
-    pub fn get_details(&self) -> Option<&str> {
-        self.details.as_deref()
+    /// Returns the specific details of this failure.
+    pub fn get_details(&self) -> &str {
+        self.details.as_str()
     }
 
     /// Overwrites the specific details of this failure.
     ///
     /// See also: [`error_details`], [`map_error`].
-    pub fn set_details(&mut self, msg: &str) {
-        self.details = Some(msg.to_owned());
+    pub fn set_details(&mut self, details: &str) {
+        self.details = details.to_owned();
     }
 
     /// Returns the input that was unable to be parsed from.
@@ -611,18 +598,11 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// If your error reporting requires a non-empty input to refer to, consider using
     /// [`ParseError::get_loc_non_empty`] instead.
-    pub fn get_loc(&self) -> Option<Toks>
+    pub fn loc(&self) -> Option<Toks>
     where
         Toks: Clone + Copy,
     {
-        match self.error_type {
-            ErrorType::EmptyInput => None,
-            ErrorType::UnexpectedInput { loc }
-            | ErrorType::Flunk { loc }
-            | ErrorType::NoParse { loc }
-            | ErrorType::NotEnough { loc, .. }
-            | ErrorType::Other { loc, .. } => Some(loc),
-        }
+        self.loc
     }
 
     /// Returns the non-empty input that was unable to be parsed from.
@@ -634,12 +614,12 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// If your error reporting does not require the input to be non-empty, you may wish to use
     /// [`ParseError::get_loc`] instead.
-    pub fn get_loc_non_empty(&self) -> Option<Toks>
+    pub fn loc_non_empty(&self) -> Option<Toks>
     where
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        match self.get_loc() {
+        match self.loc {
             Some(loc) if !loc.no_tokens() => Some(loc),
             _ => None,
         }
@@ -689,55 +669,41 @@ where
     T: Clone + Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let details = self
-            .get_details()
-            .unwrap_or("(no extra information available)");
+        let loc_preview = if let Some(loc) = self.loc {
+            &format!("Failed at: {}", loc.preview())
+        } else {
+            "(no location preview available)"
+        };
 
-        match self.error_type {
+        let err_type_message = match &self.error_type {
             ErrorType::EmptyInput => {
-                write!(f, "Parser was expecting more input, but there was none")
+                "Parser was expecting more input, but there was none"
             }
-            ErrorType::UnexpectedInput { loc } => {
-                write!(
-                    f,
-                    "Parser expected no more input, but found: {}",
-                    loc.preview()
+            ErrorType::UnexpectedInput => {
+                "Parsing failed due to unexpected input"
+            }
+            ErrorType::Other { cause } => {
+                &format!(
+                    "An error occurred while parsing: {}",
+                    cause
                 )
             }
-            ErrorType::Other { loc, .. } => {
-                write!(
-                    f,
-                    "An error occurred while parsing, Failed at: {}",
-                    loc.preview()
-                )
+            ErrorType::Flunk => {
+                "Parsing failed because a parser flunked"
             }
-            ErrorType::Flunk { loc } => {
-                write!(
-                    f,
-                    "Parser flunked: {}, Flunked at: {}",
-                    details,
-                    loc.preview()
-                )
+            ErrorType::NoParse => {
+                "Parsing was unsuccessful"
             }
-            ErrorType::NoParse { loc } => {
-                write!(
-                    f,
-                    "Parser was unsuccessful: {}, Failed at: {}",
-                    details,
-                    loc.preview()
-                )
-            }
-            ErrorType::NotEnough { loc, needed, got } => {
-                write!(
-                    f,
-                    "Parser needed to parse {} elements, but only parsed {}: {}, Failed at: {}",
+            ErrorType::NotEnough { needed, got } => {
+                &format!(
+                    "Parser needed to parse {} elements, but only parsed {}",
                     needed,
                     got,
-                    details,
-                    loc.preview()
                 )
             }
-        }
+        };
+        
+        write!(f, "{} ({}), {}", err_type_message, self.details, loc_preview)
     }
 }
 
@@ -1375,7 +1341,7 @@ where
 /// {
 ///     match input.take_one() {
 ///         Some((rest, t)) => Ok((rest, t)),
-///         None => Err(ParseError::empty_input()),
+///         None => Err(ParseError::empty_input("take_one returned None")),
 ///     }
 /// }
 ///
@@ -1396,7 +1362,7 @@ where
 ///                 ))
 ///             }
 ///         }
-///         None => Err(ParseError::empty_input()),
+///         None => Err(ParseError::empty_input("take_one returned None")),
 ///     }
 /// }
 ///
@@ -1682,10 +1648,10 @@ where
 /// });
 ///
 /// // Fails with default error message
-/// let expected1 = "Parser was unsuccessful: couldn't find token: \"couldn't find token: 'a'\", Failed at: \"b\"";
+/// let expected1 = "Parsing was unsuccessful (couldn't find token: 'a'), Failed at: \"b\"";
 /// let msg1 = p1.parse("b").unwrap_err().to_string();
 /// // Fails with custom error message
-/// let expected2 = "Parser was unsuccessful: custom message, Failed at: \"b\"";
+/// let expected2 = "Parsing was unsuccessful (custom message), Failed at: \"b\"";
 /// let msg2 = p2.parse("b").unwrap_err().to_string();
 ///
 /// assert_eq!(expected1, msg1);
@@ -1728,7 +1694,7 @@ where
 ///
 /// let e = p.parse("b").unwrap_err();
 ///
-/// assert_eq!(Some("custom details"), e.get_details());
+/// assert_eq!("custom details", e.get_details());
 /// ```
 pub fn error_details<'a, Toks, T, A, P>(p: P, details: &'a str) -> impl Parser<'a, Toks, T, A>
 where
@@ -1785,7 +1751,10 @@ where
         if input.no_tokens() {
             Ok((input, ()))
         } else {
-            Err(ParseError::unexpected_input(input))
+            Err(ParseError::unexpected_input(
+                "Expected the input to be empty, but found more",
+                input
+            ))
         }
     }
 }
@@ -1807,8 +1776,9 @@ where
 ///
 /// let p = flunk::<&str, char, ()>();
 ///
-/// let msg1 = format!("Parser flunked: flunked parser, Flunked at: \"\"");
-/// let msg2 = format!("Parser flunked: flunked parser, Flunked at: \"foo\"");
+/// let msg1 = format!("Parsing failed because a parser flunked (flunked parser), Failed at: \"\"");
+/// let msg2 = format!("Parsing failed because a parser flunked (flunked parser), Failed at: \"foo\"");
+///
 /// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
 /// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
 /// ```
@@ -1837,8 +1807,9 @@ where
 ///
 /// let p = flunk_with::<&str, char, ()>("custom message");
 ///
-/// let msg1 = format!("Parser flunked: custom message, Flunked at: \"\"");
-/// let msg2 = format!("Parser flunked: custom message, Flunked at: \"foo\"");
+/// let msg1 = format!("Parsing failed because a parser flunked (custom message), Failed at: \"\"");
+/// let msg2 = format!("Parsing failed because a parser flunked (custom message), Failed at: \"foo\"");
+///
 /// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
 /// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
 /// ```
@@ -2617,7 +2588,11 @@ where
         }
 
         if values.len() < min {
-            Err(ParseError::not_enough(input, min, values.len()))
+            Err(ParseError::not_enough(
+                "Could not parse the minimum number of values",
+                input,
+                min, values.len()
+            ))
         } else {
             Ok((input, values))
         }
@@ -3016,7 +2991,7 @@ where
     T: Clone + Debug,
 {
     move |input: Toks| match input.take_one() {
-        None => Err(ParseError::empty_input()),
+        None => Err(ParseError::empty_input("Input was empty when it was not expected to be")),
         Some((rest, t)) => Ok((rest, t)),
     }
 }
@@ -3073,7 +3048,7 @@ where
 {
     let msg = format!("couldn't find token: {:?}", tok);
     token_satisfies(move |t| *t == tok).map_error(move |mut e| {
-        e.set_details(&format!("couldn't find token: {:?}", &msg));
+        e.set_details(&msg);
         e
     })
 }
@@ -3289,28 +3264,28 @@ mod tests {
 
     #[test]
     fn parse_error_get_set_details() {
-        let mut e = ParseError::<&str, char>::empty_input();
-        assert_eq!(None, e.get_details());
+        let mut e = ParseError::<&str, char>::empty_input("details");
+        assert_eq!("details", e.get_details());
 
         e.set_details("details1");
-        assert_eq!(Some("details1"), e.get_details());
+        assert_eq!("details1", e.get_details());
         e.set_details("details2");
-        assert_eq!(Some("details2"), e.get_details());
+        assert_eq!("details2", e.get_details());
     }
 
     #[test]
     fn parse_error_loc() {
-        let e = ParseError::<&str, char>::empty_input();
-        assert_eq!(None, e.get_loc());
-        assert_eq!(None, e.get_loc_non_empty());
+        let e = ParseError::<&str, char>::empty_input("details");
+        assert_eq!(None, e.loc());
+        assert_eq!(None, e.loc_non_empty());
 
         let e = ParseError::no_parse("details", "");
-        assert_eq!(Some(""), e.get_loc());
-        assert_eq!(None, e.get_loc_non_empty());
+        assert_eq!(Some(""), e.loc());
+        assert_eq!(None, e.loc_non_empty());
 
         let e = ParseError::no_parse("details", "input");
-        assert_eq!(Some("input"), e.get_loc());
-        assert_eq!(Some("input"), e.get_loc_non_empty());
+        assert_eq!(Some("input"), e.loc());
+        assert_eq!(Some("input"), e.loc_non_empty());
     }
 
     fn make_io_error() -> Result<(), std::io::Error> {
@@ -3319,17 +3294,17 @@ mod tests {
 
     // In the future, god willing, the map_err can be replaced with just a question mark
     fn fails_with_other(input: &str) -> ParseResult<&str, char, char> {
-        let _dummy = make_io_error().map_err(|e| ParseError::other(e, input))?;
+        let _dummy = make_io_error().map_err(|e| ParseError::other("details", input, e))?;
         Ok((input, 'a')) // <--- this shouldn't happen
     }
 
     #[test]
     fn parse_error_caused_by_other() {
         let inner = make_io_error().unwrap_err();
-        let e = ParseError::<&str, char>::other(inner, "input");
+        let e = ParseError::<&str, char>::other("details", "input", inner);
         assert!(e.caused_by_other());
 
-        let e = ParseError::<&str, char>::empty_input();
+        let e = ParseError::<&str, char>::empty_input("details");
         assert!(!e.caused_by_other());
     }
 
@@ -3357,17 +3332,15 @@ mod tests {
 
         let p = fails_with_other;
         let e = p.parse("input").unwrap_err();
-        assert!(e.get_details().is_none());
         assert!(e.caused_by_other());
-        assert_eq!(Some("input"), e.get_loc());
+        assert_eq!(Some("input"), e.loc());
 
         let p = fails_with_other.map_error(|_| {
             ParseError::no_parse("details that shouldn't be here", "different input")
         });
         let e = p.parse("input").unwrap_err();
-        assert!(e.get_details().is_none());
         assert!(e.caused_by_other());
-        assert_eq!(Some("input"), e.get_loc());
+        assert_eq!(Some("input"), e.loc());
     }
 
     /*
@@ -3502,7 +3475,7 @@ mod tests {
         let e1 = p.parse("b").unwrap_err();
         let e2 = q.parse("b").unwrap_err();
 
-        assert_eq!(Some("custom details"), e2.get_details());
+        assert_eq!("custom details", e2.get_details());
         assert_ne!(e1.get_details(), e2.get_details());
     }
 
@@ -3563,16 +3536,17 @@ mod tests {
     fn test_flunk_with() {
         let p = flunk_with::<&str, char, ()>("message");
 
-        let msg1 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "");
-        let msg2 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "foo");
-        let msg3 = format!(
-            "Parser flunked: {}, Flunked at: \"{}\"",
-            "message", "anything"
-        );
+        let e_msg = p.parse("").unwrap_err().to_string();
+        assert!(e_msg.contains("message"));
+        assert!(e_msg.contains("\"\""));
 
-        assert_eq!(msg1, p.parse("").unwrap_err().to_string());
-        assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
-        assert_eq!(msg3, p.parse("anything").unwrap_err().to_string());
+        let e_msg = p.parse("foo").unwrap_err().to_string();
+        assert!(e_msg.contains("message"));
+        assert!(e_msg.contains("\"foo\""));
+
+        let e_msg = p.parse("anything").unwrap_err().to_string();
+        assert!(e_msg.contains("message"));
+        assert!(e_msg.contains("\"anything\""));
     }
 
     p_test!(
