@@ -396,13 +396,8 @@ enum ErrorType {
     EmptyInput,
     UnexpectedInput,
     Flunk,
-    NotEnough {
-        needed: usize,
-        got: usize,
-    },
-    Other {
-        cause: Box<dyn std::error::Error>,
-    },
+    NotEnough { needed: usize, got: usize },
+    Other { cause: Box<dyn std::error::Error> },
 }
 
 /// The `Err` type of [`ParseResult`].
@@ -525,11 +520,7 @@ impl<Toks, T> ParseError<Toks, T> {
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self::construct_generic(
-            ErrorType::NotEnough { needed, got },
-            details,
-            Some(loc),
-        )
+        Self::construct_generic(ErrorType::NotEnough { needed, got }, details, Some(loc))
     }
 
     /// Signals that a parser has failed due to external factors.
@@ -568,9 +559,11 @@ impl<Toks, T> ParseError<Toks, T> {
         E: std::error::Error + 'static,
     {
         Self::construct_generic(
-            ErrorType::Other { cause: Box::new(cause) },
+            ErrorType::Other {
+                cause: Box::new(cause),
+            },
             details,
-            Some(loc)
+            Some(loc),
         )
     }
 
@@ -746,34 +739,22 @@ where
         };
 
         let err_type_message = match &self.error_type {
-            ErrorType::EmptyInput => {
-                "Parser was expecting more input, but there was none"
-            }
-            ErrorType::UnexpectedInput => {
-                "Parsing failed due to unexpected input"
-            }
-            ErrorType::Other { cause } => {
-                &format!(
-                    "An error occurred while parsing: {}",
-                    cause
-                )
-            }
-            ErrorType::Flunk => {
-                "Parsing failed because a parser flunked"
-            }
-            ErrorType::NoParse => {
-                "Parsing was unsuccessful"
-            }
-            ErrorType::NotEnough { needed, got } => {
-                &format!(
-                    "Parser needed to parse {} elements, but only parsed {}",
-                    needed,
-                    got,
-                )
-            }
+            ErrorType::EmptyInput => "Parser was expecting more input, but there was none",
+            ErrorType::UnexpectedInput => "Parsing failed due to unexpected input",
+            ErrorType::Other { cause } => &format!("An error occurred while parsing: {}", cause),
+            ErrorType::Flunk => "Parsing failed because a parser flunked",
+            ErrorType::NoParse => "Parsing was unsuccessful",
+            ErrorType::NotEnough { needed, got } => &format!(
+                "Parser needed to parse {} elements, but only parsed {}",
+                needed, got,
+            ),
         };
-        
-        write!(f, "{} ({}), {}", err_type_message, self.details, loc_preview)
+
+        write!(
+            f,
+            "{} ({}), {}",
+            err_type_message, self.details, loc_preview
+        )
     }
 }
 
@@ -1823,7 +1804,7 @@ where
         } else {
             Err(ParseError::unexpected_input(
                 "Expected the input to be empty, but found more",
-                input
+                input,
             ))
         }
     }
@@ -2661,7 +2642,8 @@ where
             Err(ParseError::not_enough(
                 "Could not parse the minimum number of values",
                 input,
-                min, values.len()
+                min,
+                values.len(),
             ))
         } else {
             Ok((input, values))
@@ -3061,7 +3043,9 @@ where
     T: Clone + Debug,
 {
     move |input: Toks| match input.take_one() {
-        None => Err(ParseError::empty_input("Input was empty when it was not expected to be")),
+        None => Err(ParseError::empty_input(
+            "Input was empty when it was not expected to be",
+        )),
         Some((rest, t)) => Ok((rest, t)),
     }
 }
