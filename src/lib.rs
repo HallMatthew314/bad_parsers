@@ -227,7 +227,7 @@
 //! with creating the error type ourselves.
 //! In fact, all we really need to do is provide some more-specific details about how/why the
 //! parser failed.
-//! To that end, we can use the [`error_details`] function to do just that.
+//! To that end, we can use the [`map_error_details`] function to do just that.
 //!
 //! For our parser, the [`token_satisfies`] can fail if it doesn't find a digit, but as long
 //! as it finds at least one, then the parser should still succeed.
@@ -239,7 +239,7 @@
 //! let front_number = token_satisfies(char::is_ascii_digit)
 //!     .map(|c| c.to_digit(10).unwrap())
 //!     .mult1()
-//!     .error_details("front_number couldn't find any digits")
+//!     .map_error_details("front_number couldn't find any digits")
 //!     .map(|digs| {
 //!         let mut n = 0;
 //!         for d in digs {
@@ -277,7 +277,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .error_details("front_number couldn't find any digits")
+//!         .map_error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -313,7 +313,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .error_details("front_number couldn't find any digits")
+//!         .map_error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -349,7 +349,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .error_details("front_number couldn't find any digits")
+//!         .map_error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -574,16 +574,86 @@ impl<Toks, T> ParseError<Toks, T> {
         )
     }
 
-    /// Returns the specific details of this failure.
-    pub fn get_details(&self) -> &str {
+    /// Returns the specific details of this error value.
+    ///
+    /// See also: [`ParseError::append_details`], [`ParseError::overwrite_details`],
+    /// [`ParseError::prepend_details`],
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    ///
+    /// let e = p.parse("not a").unwrap_err();
+    /// let expected_details = "couldn't find token: 'a'";
+    ///
+    /// assert_eq!(expected_details, e.details());
+    /// ```
+    pub fn details(&self) -> &str {
         self.details.as_str()
     }
 
-    /// Overwrites the specific details of this failure.
+    /// Overwrites the specific details of this error value.
     ///
-    /// See also: [`error_details`], [`map_error`].
-    pub fn set_details(&mut self, details: &str) {
+    /// See also: [`ParseError::append_details`], [`ParseError::details`],
+    /// [`ParseError::prepend_details`], [`map_error_details`], [`map_error`].
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    /// let custom_details = "banana";
+    ///
+    /// let mut e = p.parse("not a").unwrap_err();
+    /// assert_ne!(custom_details, e.details());
+    ///
+    /// e.overwrite_details(custom_details);
+    /// assert_eq!(custom_details, e.details());
+    /// ```
+    pub fn overwrite_details(&mut self, details: &str) {
         self.details = details.to_owned();
+    }
+
+    /// Prepends some text to the specific details of this error value.
+    ///
+    /// See also: [`ParseError::append_details`], [`ParseError::details`],
+    /// [`ParseError::overwrite_details`], [`map_error_details`], [`map_error`].
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    ///
+    /// let mut e = p.parse("not a").unwrap_err();
+    ///
+    /// e.overwrite_details("banana");
+    /// e.prepend_details("ripe ");
+    ///
+    /// assert_eq!("ripe banana", e.details());
+    /// ```
+    pub fn prepend_details(&mut self, prefix: &str) {
+        self.details = format!("{}{}", prefix, self.details);
+    }
+
+    /// Appends some text to the specific details of this error value.
+    ///
+    /// See also: [`ParseError::details`], [`ParseError::overwrite_details`],
+    /// [`ParseError::prepend_details`], [`map_error_details`], [`map_error`].
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    ///
+    /// let mut e = p.parse("not a").unwrap_err();
+    ///
+    /// e.overwrite_details("banana");
+    /// e.append_details(" split");
+    ///
+    /// assert_eq!("banana split", e.details());
+    /// ```
+    pub fn append_details(&mut self, suffix: &str) {
+        self.details = format!("{}{}", self.details, suffix);
     }
 
     /// Returns the input that was unable to be parsed from.
@@ -597,7 +667,7 @@ impl<Toks, T> ParseError<Toks, T> {
     /// guarantee.
     ///
     /// If your error reporting requires a non-empty input to refer to, consider using
-    /// [`ParseError::get_loc_non_empty`] instead.
+    /// [`ParseError::loc_non_empty`] instead.
     pub fn loc(&self) -> Option<Toks>
     where
         Toks: Clone + Copy,
@@ -613,7 +683,7 @@ impl<Toks, T> ParseError<Toks, T> {
     /// The input states returned by this method are guaranteed to be non-empty.
     ///
     /// If your error reporting does not require the input to be non-empty, you may wish to use
-    /// [`ParseError::get_loc`] instead.
+    /// [`ParseError::loc`] instead.
     pub fn loc_non_empty(&self) -> Option<Toks>
     where
         Toks: Tokens<T>,
@@ -1039,14 +1109,14 @@ where
         map_error(self, f)
     }
 
-    /// Method version of [`error_details`].
-    fn error_details(self, details: &'a str) -> impl Parser<'a, Toks, T, A>
+    /// Method version of [`map_error_details`].
+    fn map_error_details(self, details: &'a str) -> impl Parser<'a, Toks, T, A>
     where
         Self: Sized + 'a,
         Toks: 'a,
         A: 'a,
     {
-        error_details(self, details)
+        map_error_details(self, details)
     }
 
     /// Method version of [`and_then`].
@@ -1636,14 +1706,14 @@ where
 /// outside of the parser chain. However, this function does not prohibit the creation of
 /// such error values.
 ///
-/// See also: [`ParseError`], [`error_details`].
+/// See also: [`ParseError`], [`map_error_details`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, ParseError, token};
 ///
 /// let p1 = token('a');
 /// let p2 = token('a').map_error(|mut e| {
-///     e.set_details("custom message");
+///     e.overwrite_details("custom message");
 ///     e
 /// });
 ///
@@ -1690,20 +1760,20 @@ where
 /// ```
 /// use bad_parsers::{Parser, token};
 ///
-/// let p = token('a').error_details("custom details");
+/// let p = token('a').map_error_details("custom details");
 ///
 /// let e = p.parse("b").unwrap_err();
 ///
-/// assert_eq!("custom details", e.get_details());
+/// assert_eq!("custom details", e.details());
 /// ```
-pub fn error_details<'a, Toks, T, A, P>(p: P, details: &'a str) -> impl Parser<'a, Toks, T, A>
+pub fn map_error_details<'a, Toks, T, A, P>(p: P, details: &'a str) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
     T: Clone + Debug,
     P: Parser<'a, Toks, T, A> + 'a,
 {
     map_error(p, |mut e| {
-        e.set_details(details);
+        e.overwrite_details(details);
         e
     })
 }
@@ -3048,7 +3118,7 @@ where
 {
     let msg = format!("couldn't find token: {:?}", tok);
     token_satisfies(move |t| *t == tok).map_error(move |mut e| {
-        e.set_details(&msg);
+        e.overwrite_details(&msg);
         e
     })
 }
@@ -3263,14 +3333,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_error_get_set_details() {
+    fn parse_error_get_overwrite_details() {
         let mut e = ParseError::<&str, char>::empty_input("details");
-        assert_eq!("details", e.get_details());
+        assert_eq!("details", e.details());
 
-        e.set_details("details1");
-        assert_eq!("details1", e.get_details());
-        e.set_details("details2");
-        assert_eq!("details2", e.get_details());
+        e.overwrite_details("details1");
+        assert_eq!("details1", e.details());
+        e.overwrite_details("details2");
+        assert_eq!("details2", e.details());
     }
 
     #[test]
@@ -3456,7 +3526,7 @@ mod tests {
     #[test]
     fn test_map_error() {
         let p = token('a').map_error(|mut e| {
-            e.set_details("couldn't find letter 'a'");
+            e.overwrite_details("couldn't find letter 'a'");
             e
         });
 
@@ -3468,15 +3538,15 @@ mod tests {
     }
 
     #[test]
-    fn test_error_details() {
+    fn test_map_error_details() {
         let p = token('a');
-        let q = token('a').error_details("custom details");
+        let q = token('a').map_error_details("custom details");
 
         let e1 = p.parse("b").unwrap_err();
         let e2 = q.parse("b").unwrap_err();
 
-        assert_eq!("custom details", e2.get_details());
-        assert_ne!(e1.get_details(), e2.get_details());
+        assert_eq!("custom details", e2.details());
+        assert_ne!(e1.details(), e2.details());
     }
 
     p_test!(
