@@ -15,21 +15,40 @@ nothing so far
 
 - Changelog
 - Example: JSON parser
-- `ParseError.error_details`: a more convenient function for changing error details
+- `ParseError::map_error_details`: a more convenient function for changing error details
 - `trailing` + method version: a combinator similar to `left`, but allows the second parser to fail
 - `was_parsed` + method version: a combinator similar to `optional` that returns a boolean
+- `ParseError::append_error` and `ParseError::prepend_error` for more convenient error details modification
 
 ### Fixed
 
 - The functions `left`, `recover`, `recover_default`, `right`, and `trailing` no longer have
     the `T: 'a` constraint.
 
-### Changed
+### Breaking Changes
+- Arguments for all error constructor functions now, and shall adhere to these restrictions:
+    - First argument: `details: &str`, required on all constructors
+    - Second argument (if applicable): `loc: Toks`, not required of constructors for situations where no meaningful value can be provided (e.g., `empty_input`).
+    - All other arguments following these are specific to the type of error being constructed
+- Due to the above: the following constructor arguments have changed:
+    - `empty_input()` is now `empty_input(&str)`
+    - `unexpected_input()` is now `unexpected_input(&str, Toks)`
+    - `not_enough(Toks, usize, usize)` is now `not_enough(&str, Toks, usize, usize)`
+    - `other(E, Toks)` is now `other(&str, Toks, E)`
+- Some error methods were renamed to better suit Rust's conventions:
+    - `get_details` renamed to `ParseError::details`
+    - `set_details` renamed to `ParseError::overwrite_details`
+    - `get_loc` renamed to `ParseError::loc`
+    - `get_loc_non_empty` renamed to `loc_non_empty`
+- Newly-named `ParseError::details` function returns `&str` instead of `Option<&str>`
+- Combinator `error_details` renamed to `map_error_details`
 
+#### Non-Breaking Changes
 - Added documentation link to Cargo.toml
-- Made the default error message for `token` more useful
-- Changed some more doctests to use the new `error_details` function
+- Made the default error details for `token` more useful
+- Changed some more doctests to use the new `map_error_details` function
 - Various superfluous changes to documentation
+- Modified the template string for displayed errors in light of other reworks
 
 ### Deprecated
 
