@@ -1,6 +1,6 @@
 [package]
 name = "bad_parsers"
-version = "0.1.0-unstable"
+version = "0.2.0-unstable"
 authors = ["Matthew Hall"]
 edition = "2024"
 description = "A parser combinator library written by myself, for myself"
