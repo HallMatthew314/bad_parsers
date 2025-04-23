@@ -5,11 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Security
-
-nothing so far
+## [0.1.1-unstable]
 
 ### Added
 
@@ -42,20 +38,12 @@ nothing so far
 - Newly-named `ParseError::details` function returns `&str` instead of `Option<&str>`
 - Combinator `error_details` renamed to `map_error_details`
 
-#### Non-Breaking Changes
+### Non-Breaking Changes
 - Added documentation link to Cargo.toml
 - Made the default error details for `token` more useful
 - Changed some doctests to use the new `map_error_details` function
 - Various superfluous changes to documentation
 - Modified the template string in `ParseError`'s implementation of `Display`
-
-### Deprecated
-
-nothing so far
-
-### Removed
-
-nothing so far
 
 ## [0.1.0-unstable]
 
