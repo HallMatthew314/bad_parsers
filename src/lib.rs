@@ -3,13 +3,13 @@
 //!
 //! Don't say I didn't warn you.
 //!
-//! `bad_parsers` is a parser combinator library written entirely from scratch in safe Rust
+//! `bad_parsers` is a parser combinator library written entirely from scratch in ~~safe~~ Rust
 //! with no external dependencies.
 //! The provided parsers are able to parse from string slices, arbitrary token type slices,
 //! as well as other token collections you may wish to implement yourself.
 //!
-//! As an added bonus, using this library in your own project is guaranteed to
-//! make it worse! For free!
+//! As an added bonus, using this library in your own project is guaranteed to make it worse!
+//! For free!
 //! ## Main Features
 //! * A [Parser trait](Parser) that primarily interfaces with functions and closures that act
 //!     like parsers, but could also be used to treat other types as parsers as well.
@@ -223,6 +223,12 @@
 //! This function works in a way similar to [`Result::map_err`] and allows for modification of
 //! the error value that the parser was going to return.
 //!
+//! Our parser has been put together from various combinators, so we shouldn't need to bother
+//! with creating the error type ourselves.
+//! In fact, all we really need to do is provide some more-specific details about how/why the
+//! parser failed.
+//! To that end, we can use the [`map_error_details`] function to do just that.
+//!
 //! For our parser, the [`token_satisfies`] can fail if it doesn't find a digit, but as long
 //! as it finds at least one, then the parser should still succeed.
 //! We only have that pesky zero-digit case to worry about, so we can add a helpful error
@@ -233,10 +239,7 @@
 //! let front_number = token_satisfies(char::is_ascii_digit)
 //!     .map(|c| c.to_digit(10).unwrap())
 //!     .mult1()
-//!     .map_error(|mut e| {
-//!         e.set_details("front_number couldn't find any digits");
-//!         e
-//!     })
+//!     .map_error_details("front_number couldn't find any digits")
 //!     .map(|digs| {
 //!         let mut n = 0;
 //!         for d in digs {
@@ -248,7 +251,7 @@
 //!
 //! assert_eq!(("", 123), front_number.parse("123").unwrap());
 //!
-//! let expected = "Parser needed to parse 1 elements, but only parsed 0: front_number couldn't find any digits, Failed at: \"foo\"";
+//! let expected = "Parser needed to parse 1 elements, but only parsed 0 (front_number couldn't find any digits), Failed at: \"foo\"";
 //! assert_eq!(expected.to_string(), front_number.parse("foo").unwrap_err().to_string());
 //! ```
 //! Now that we've modified the details of the original [`ParseError`], the parser's error
@@ -274,10 +277,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .map_error(|mut e| {
-//!             e.set_details("front_number couldn't find any digits");
-//!             e
-//!         })
+//!         .map_error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -313,10 +313,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .map_error(|mut e| {
-//!             e.set_details("front_number couldn't find any digits");
-//!             e
-//!         })
+//!         .map_error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -352,10 +349,7 @@
 //!     let p = token_satisfies(char::is_ascii_digit)
 //!         .map(|c| c.to_digit(10).unwrap())
 //!         .mult1()
-//!         .map_error(|mut e| {
-//!             e.set_details("front_number couldn't find any digits");
-//!             e
-//!         })
+//!         .map_error_details("front_number couldn't find any digits")
 //!         .map(|digs| {
 //!             let mut n = 0;
 //!             for d in digs {
@@ -380,7 +374,7 @@
 //! computer science problem, one that stumped Turing, Church, and even von Neumann!
 //!
 //! I really ought to submit this feature to the Rust development team.
-//! The standard library could really make use of this-
+//! The standard library could really make use of-
 //! ```
 //! # // do you really need to see it working again?
 //! # fn parse_int(_input: &str) -> Option<u32> { Some(123) }
@@ -397,26 +391,13 @@ use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
 #[derive(Debug)]
-enum ErrorType<Toks> {
-    NoParse {
-        loc: Toks,
-    },
+enum ErrorType {
+    NoParse,
     EmptyInput,
-    UnexpectedInput {
-        loc: Toks,
-    },
-    Flunk {
-        loc: Toks,
-    },
-    NotEnough {
-        loc: Toks,
-        needed: usize,
-        got: usize,
-    },
-    Other {
-        cause: Box<dyn std::error::Error>,
-        loc: Toks,
-    },
+    UnexpectedInput,
+    Flunk,
+    NotEnough { needed: usize, got: usize },
+    Other { cause: Box<dyn std::error::Error> },
 }
 
 /// The `Err` type of [`ParseResult`].
@@ -436,7 +417,8 @@ enum ErrorType<Toks> {
 /// to the number of parsed elements, while [`ParseError::empty_input`] requires no extra
 /// information at all.
 /// The two most common values to give a constructor are:
-/// * `details`: a `&str` providing extra human-readable information about this specific failure
+/// * `details`: a [`&str`] providing extra human-readable information about this specific
+///     failure
 /// * `loc` a `Toks` providing the input that the parser failed to parse from
 ///
 /// When providing `details`, the information should be relevant to the specific parser in
@@ -451,48 +433,51 @@ enum ErrorType<Toks> {
 ///
 /// let digit = token_satisfies(char::is_ascii_digit)
 ///     .map_error(|e: ParseError<&str, char>| {
-///         if let Some(input) = e.get_loc_non_empty() {
+///         if let Some(input) = e.loc_non_empty() {
 ///             let c = input.take_one().unwrap().1;
 ///             ParseError::no_parse(
 ///                 &format!("expected a digit, but found: {:?}", c),
 ///                 input,
 ///             )
 ///         } else {
-///             ParseError::empty_input()
+///             ParseError::empty_input("expected a digit, found nothing")
 ///         }
 ///     });
 /// ```
 #[derive(Debug)]
 pub struct ParseError<Toks, T> {
-    error_type: ErrorType<Toks>,
-    details: Option<String>,
+    error_type: ErrorType,
+    details: String,
+    loc: Option<Toks>,
     _phantom: PhantomData<T>,
 }
 
 impl<Toks, T> ParseError<Toks, T> {
-    /// Signals that a parser has failed to parse due to the input ending sooner than expected.
-    pub fn empty_input() -> Self {
+    #[doc(hidden)]
+    fn construct_generic(error_type: ErrorType, details: &str, loc: Option<Toks>) -> Self {
         Self {
-            error_type: ErrorType::EmptyInput,
-            details: None,
+            error_type,
+            details: details.to_owned(),
+            loc,
             _phantom: PhantomData,
         }
+    }
+
+    /// Signals that a parser has failed to parse due to the input ending sooner than expected.
+    pub fn empty_input(details: &str) -> Self {
+        Self::construct_generic(ErrorType::EmptyInput, details, None)
     }
 
     /// Signals that a parser has failed to parse because it expected the input to be empty,
     /// but it was not.
     ///
     /// See also: [`eof`].
-    pub fn unexpected_input(loc: Toks) -> Self
+    pub fn unexpected_input(details: &str, loc: Toks) -> Self
     where
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::UnexpectedInput { loc },
-            details: None,
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(ErrorType::UnexpectedInput, details, Some(loc))
     }
 
     /// Signals that a parser has failed intentionally.
@@ -503,11 +488,7 @@ impl<Toks, T> ParseError<Toks, T> {
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::Flunk { loc },
-            details: Some(details.to_owned()),
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(ErrorType::Flunk, details, Some(loc))
     }
 
     /// Signals that a parser has failed to parse whatever it was trying to parse.
@@ -524,11 +505,7 @@ impl<Toks, T> ParseError<Toks, T> {
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::NoParse { loc },
-            details: Some(details.to_owned()),
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(ErrorType::NoParse, details, Some(loc))
     }
 
     /// Signals that a parser has failed due to being unable to parse as many elements as it
@@ -538,16 +515,12 @@ impl<Toks, T> ParseError<Toks, T> {
     /// parser* in order to collect multiple elements.
     ///
     /// See also: [`at_least`], [`in_range`], [`mult1`], [`sep_by`].
-    pub fn not_enough(loc: Toks, needed: usize, got: usize) -> Self
+    pub fn not_enough(details: &str, loc: Toks, needed: usize, got: usize) -> Self
     where
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        Self {
-            error_type: ErrorType::NotEnough { loc, needed, got },
-            details: None,
-            _phantom: PhantomData,
-        }
+        Self::construct_generic(ErrorType::NotEnough { needed, got }, details, Some(loc))
     }
 
     /// Signals that a parser has failed due to external factors.
@@ -579,25 +552,101 @@ impl<Toks, T> ParseError<Toks, T> {
     /// * [`recover`]
     /// * [`recover_default`]
     /// * [`sep_by`]
-    pub fn other<E: std::error::Error + 'static>(cause: E, loc: Toks) -> Self {
-        Self {
-            error_type: ErrorType::Other {
+    /// * [`trailing`]
+    /// * [`was_parsed`]
+    pub fn other<E>(details: &str, loc: Toks, cause: E) -> Self
+    where
+        E: std::error::Error + 'static,
+    {
+        Self::construct_generic(
+            ErrorType::Other {
                 cause: Box::new(cause),
-                loc,
             },
-            details: None,
-            _phantom: PhantomData,
-        }
+            details,
+            Some(loc),
+        )
     }
 
-    /// Returns the specific details of this failure, if there are any.
-    pub fn get_details(&self) -> Option<&str> {
-        self.details.as_deref()
+    /// Returns the specific details of this error value.
+    ///
+    /// See also: [`ParseError::append_details`], [`ParseError::overwrite_details`],
+    /// [`ParseError::prepend_details`],
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    ///
+    /// let e = p.parse("not a").unwrap_err();
+    /// let expected_details = "couldn't find token: 'a'";
+    ///
+    /// assert_eq!(expected_details, e.details());
+    /// ```
+    pub fn details(&self) -> &str {
+        self.details.as_str()
     }
 
-    /// Overwrites the specific details of this failure.
-    pub fn set_details(&mut self, msg: &str) {
-        self.details = Some(msg.to_owned());
+    /// Overwrites the specific details of this error value.
+    ///
+    /// See also: [`ParseError::append_details`], [`ParseError::details`],
+    /// [`ParseError::prepend_details`], [`map_error_details`], [`map_error`].
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    /// let custom_details = "banana";
+    ///
+    /// let mut e = p.parse("not a").unwrap_err();
+    /// assert_ne!(custom_details, e.details());
+    ///
+    /// e.overwrite_details(custom_details);
+    /// assert_eq!(custom_details, e.details());
+    /// ```
+    pub fn overwrite_details(&mut self, details: &str) {
+        self.details = details.to_owned();
+    }
+
+    /// Prepends some text to the specific details of this error value.
+    ///
+    /// See also: [`ParseError::append_details`], [`ParseError::details`],
+    /// [`ParseError::overwrite_details`], [`map_error_details`], [`map_error`].
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    ///
+    /// let mut e = p.parse("not a").unwrap_err();
+    ///
+    /// e.overwrite_details("banana");
+    /// e.prepend_details("ripe ");
+    ///
+    /// assert_eq!("ripe banana", e.details());
+    /// ```
+    pub fn prepend_details(&mut self, prefix: &str) {
+        self.details = format!("{}{}", prefix, self.details);
+    }
+
+    /// Appends some text to the specific details of this error value.
+    ///
+    /// See also: [`ParseError::details`], [`ParseError::overwrite_details`],
+    /// [`ParseError::prepend_details`], [`map_error_details`], [`map_error`].
+    /// ## Examples
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, token};
+    ///
+    /// let p = token('a');
+    ///
+    /// let mut e = p.parse("not a").unwrap_err();
+    ///
+    /// e.overwrite_details("banana");
+    /// e.append_details(" split");
+    ///
+    /// assert_eq!("banana split", e.details());
+    /// ```
+    pub fn append_details(&mut self, suffix: &str) {
+        self.details = format!("{}{}", self.details, suffix);
     }
 
     /// Returns the input that was unable to be parsed from.
@@ -611,19 +660,12 @@ impl<Toks, T> ParseError<Toks, T> {
     /// guarantee.
     ///
     /// If your error reporting requires a non-empty input to refer to, consider using
-    /// [`ParseError::get_loc_non_empty`] instead.
-    pub fn get_loc(&self) -> Option<Toks>
+    /// [`ParseError::loc_non_empty`] instead.
+    pub fn loc(&self) -> Option<Toks>
     where
         Toks: Clone + Copy,
     {
-        match self.error_type {
-            ErrorType::EmptyInput => None,
-            ErrorType::UnexpectedInput { loc }
-            | ErrorType::Flunk { loc }
-            | ErrorType::NoParse { loc }
-            | ErrorType::NotEnough { loc, .. }
-            | ErrorType::Other { loc, .. } => Some(loc),
-        }
+        self.loc
     }
 
     /// Returns the non-empty input that was unable to be parsed from.
@@ -634,13 +676,13 @@ impl<Toks, T> ParseError<Toks, T> {
     /// The input states returned by this method are guaranteed to be non-empty.
     ///
     /// If your error reporting does not require the input to be non-empty, you may wish to use
-    /// [`ParseError::get_loc`] instead.
-    pub fn get_loc_non_empty(&self) -> Option<Toks>
+    /// [`ParseError::loc`] instead.
+    pub fn loc_non_empty(&self) -> Option<Toks>
     where
         Toks: Tokens<T>,
         T: Clone + Debug,
     {
-        match self.get_loc() {
+        match self.loc {
             Some(loc) if !loc.no_tokens() => Some(loc),
             _ => None,
         }
@@ -650,10 +692,10 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// If this returns `true`, a parser should not attempt to recover from this error.
     /// This is because the parsing will have failed not due to parser failure, but by being
-    /// interrupted by another class of error that should be handled
-    /// outside of the parser chain.
+    /// interrupted by another class of error that should be handled outside of the parser
+    /// chain.
     ///
-    /// See also: [`Parser::map_error`].
+    /// See also: [`ParseError::other`].
     pub fn caused_by_other(&self) -> bool {
         matches!(self.error_type, ErrorType::Other { .. })
     }
@@ -690,55 +732,29 @@ where
     T: Clone + Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let details = self
-            .get_details()
-            .unwrap_or("(no extra information available)");
+        let loc_preview = if let Some(loc) = self.loc {
+            &format!("Failed at: {}", loc.preview())
+        } else {
+            "(no location preview available)"
+        };
 
-        match self.error_type {
-            ErrorType::EmptyInput => {
-                write!(f, "Parser was expecting more input, but there was none")
-            }
-            ErrorType::UnexpectedInput { loc } => {
-                write!(
-                    f,
-                    "Parser expected no more input, but found: {}",
-                    loc.preview()
-                )
-            }
-            ErrorType::Other { loc, .. } => {
-                write!(
-                    f,
-                    "An error occurred while parsing, Failed at: {}",
-                    loc.preview()
-                )
-            }
-            ErrorType::Flunk { loc } => {
-                write!(
-                    f,
-                    "Parser flunked: {}, Flunked at: {}",
-                    details,
-                    loc.preview()
-                )
-            }
-            ErrorType::NoParse { loc } => {
-                write!(
-                    f,
-                    "Parser was unsuccessful: {}, Failed at: {}",
-                    details,
-                    loc.preview()
-                )
-            }
-            ErrorType::NotEnough { loc, needed, got } => {
-                write!(
-                    f,
-                    "Parser needed to parse {} elements, but only parsed {}: {}, Failed at: {}",
-                    needed,
-                    got,
-                    details,
-                    loc.preview()
-                )
-            }
-        }
+        let err_type_message = match &self.error_type {
+            ErrorType::EmptyInput => "Parser was expecting more input, but there was none",
+            ErrorType::UnexpectedInput => "Parsing failed due to unexpected input",
+            ErrorType::Other { cause } => &format!("An error occurred while parsing: {}", cause),
+            ErrorType::Flunk => "Parsing failed because a parser flunked",
+            ErrorType::NoParse => "Parsing was unsuccessful",
+            ErrorType::NotEnough { needed, got } => &format!(
+                "Parser needed to parse {} elements, but only parsed {}",
+                needed, got,
+            ),
+        };
+
+        write!(
+            f,
+            "{} ({}), {}",
+            err_type_message, self.details, loc_preview
+        )
     }
 }
 
@@ -1074,6 +1090,16 @@ where
         map_error(self, f)
     }
 
+    /// Method version of [`map_error_details`].
+    fn map_error_details(self, details: &'a str) -> impl Parser<'a, Toks, T, A>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+    {
+        map_error_details(self, details)
+    }
+
     /// Method version of [`and_then`].
     fn and_then<F, Q, B>(self, f: F) -> impl Parser<'a, Toks, T, B>
     where
@@ -1147,7 +1173,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: Clone + 'a,
     {
         recover(self, value)
@@ -1158,7 +1183,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: Default + 'a,
     {
         recover_default(self)
@@ -1172,6 +1196,16 @@ where
         A: 'a,
     {
         optional(self)
+    }
+
+    /// Method version of [`was_parsed`]
+    fn was_parsed(self) -> impl Parser<'a, Toks, T, bool>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+    {
+        was_parsed(self)
     }
 
     /// Method version of [`ensure`]
@@ -1213,7 +1247,6 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: 'a,
         Q: Parser<'a, Toks, T, B> + 'a,
         B: 'a,
@@ -1226,12 +1259,23 @@ where
     where
         Self: Sized + 'a,
         Toks: 'a,
-        T: 'a, // TODO: lifetime oddity
         A: 'a,
         Q: Parser<'a, Toks, T, B> + 'a,
         B: 'a,
     {
         right(self, other)
+    }
+
+    /// Method version of [`trailing`]
+    fn trailing<Q, B>(self, other: Q) -> impl Parser<'a, Toks, T, A>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+        Q: Parser<'a, Toks, T, B> + 'a,
+        B: 'a,
+    {
+        trailing(self, other)
     }
 
     /// Method version of [`in_range`]
@@ -1348,7 +1392,7 @@ where
 /// {
 ///     match input.take_one() {
 ///         Some((rest, t)) => Ok((rest, t)),
-///         None => Err(ParseError::empty_input()),
+///         None => Err(ParseError::empty_input("take_one returned None")),
 ///     }
 /// }
 ///
@@ -1369,7 +1413,7 @@ where
 ///                 ))
 ///             }
 ///         }
-///         None => Err(ParseError::empty_input()),
+///         None => Err(ParseError::empty_input("take_one returned None")),
 ///     }
 /// }
 ///
@@ -1505,6 +1549,46 @@ where
     }
 }
 
+// DEVELOPER NOTE: TOKEN LIFETIME QUIRK WHEN IMPLEMENTING PARSERS
+// Written 2025-04-21
+// For reasons I have not yet fully understood, some of the previous implementations
+// of these functions required that the token type `T` live for as long as
+// everythig else, despite few other functions needing this restriction.
+// Before being rewritten, the functions in question were: left, recover, recover_default,
+// right, and trailing.
+// My best guess is that their prior definitions in terms of other combinators somehow
+// introduced a complexity that the borrow-checker couldn't reason about on its own.
+// Example:
+// ```
+// {
+//     // prior implementation of `left`
+//     // this complains about lifetimes
+//     plus(p, q).map(|tup| tup.0)
+// }
+// {
+//     // fixed implementation of `left`
+//     // this doesn't complain about lifetimes
+//     move |input1| {
+//         let (input2, x) = p.parse(input1)?;
+//         let (input3, _) = p.parse(input2)?;
+//         Ok((input3, x))
+//     }
+// }
+// ```
+// I do not believe it was the specific functions being used that required this lifetime
+// constraint, as they themselves did not need it and worked just fine.
+//
+// What I'm trying to say is: if you encounter this issue when building a new combinator,
+// see if you're using another combinator already and eliminate it if you can.
+// It's not very DRY, but I am willing to sacrifice that so that use of the functions in
+// this library are less restricted.
+// Additionally, the requirements of the combinators are unlikely to definitionally
+// change in the future, so I would be surprised if this would cause any refactoring headaches
+// due to some kind of drastic change in Rust or the greater API of this library. (If it does,
+// then you probably have bigger problems than a lifetime constraint.)
+// In any case, rewriting the functions didn't break any tests, or even the JSON example
+// so this is done as far as I'm concerned.
+
 /// Creates a [`Parser`] that tries to parse with all of the argument parsers.
 ///
 /// This macro acts as a shorthand for chaining many individual parsers together with [`or`].
@@ -1603,22 +1687,22 @@ where
 /// outside of the parser chain. However, this function does not prohibit the creation of
 /// such error values.
 ///
-/// See also: [`ParseError`].
+/// See also: [`ParseError`], [`map_error_details`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, ParseError, token};
 ///
 /// let p1 = token('a');
 /// let p2 = token('a').map_error(|mut e| {
-///     e.set_details("custom message");
+///     e.overwrite_details("custom message");
 ///     e
 /// });
 ///
 /// // Fails with default error message
-/// let expected1 = "Parser was unsuccessful: predicate of ensure failed, Failed at: \"b\"";
+/// let expected1 = "Parsing was unsuccessful (couldn't find token: 'a'), Failed at: \"b\"";
 /// let msg1 = p1.parse("b").unwrap_err().to_string();
 /// // Fails with custom error message
-/// let expected2 = "Parser was unsuccessful: custom message, Failed at: \"b\"";
+/// let expected2 = "Parsing was unsuccessful (custom message), Failed at: \"b\"";
 /// let msg2 = p2.parse("b").unwrap_err().to_string();
 ///
 /// assert_eq!(expected1, msg1);
@@ -1641,6 +1725,38 @@ where
         }
     };
     move |input| p.parse(input).map_err(&map_f)
+}
+
+/// Changes the provided parser's error details to the provided [`&str`].
+///
+/// This method provides a convenient option for error customization when all that needs
+/// to be altered is the details message.
+///
+/// **Note:** this function explicitly prohibits the modification of error values
+/// created with the [`ParseError::other`] function, as such errors were caused by factors
+/// outside of the parser chain.
+///
+/// See also: [`ParseError`], [`map_error`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let p = token('a').map_error_details("custom details");
+///
+/// let e = p.parse("b").unwrap_err();
+///
+/// assert_eq!("custom details", e.details());
+/// ```
+pub fn map_error_details<'a, Toks, T, A, P>(p: P, details: &'a str) -> impl Parser<'a, Toks, T, A>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    P: Parser<'a, Toks, T, A> + 'a,
+{
+    map_error(p, |mut e| {
+        e.overwrite_details(details);
+        e
+    })
 }
 
 /// Creates a parser that always succeeds and performs no meaningful operations.
@@ -1686,7 +1802,10 @@ where
         if input.no_tokens() {
             Ok((input, ()))
         } else {
-            Err(ParseError::unexpected_input(input))
+            Err(ParseError::unexpected_input(
+                "Expected the input to be empty, but found more",
+                input,
+            ))
         }
     }
 }
@@ -1708,8 +1827,9 @@ where
 ///
 /// let p = flunk::<&str, char, ()>();
 ///
-/// let msg1 = format!("Parser flunked: flunked parser, Flunked at: \"\"");
-/// let msg2 = format!("Parser flunked: flunked parser, Flunked at: \"foo\"");
+/// let msg1 = format!("Parsing failed because a parser flunked (flunked parser), Failed at: \"\"");
+/// let msg2 = format!("Parsing failed because a parser flunked (flunked parser), Failed at: \"foo\"");
+///
 /// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
 /// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
 /// ```
@@ -1738,8 +1858,9 @@ where
 ///
 /// let p = flunk_with::<&str, char, ()>("custom message");
 ///
-/// let msg1 = format!("Parser flunked: custom message, Flunked at: \"\"");
-/// let msg2 = format!("Parser flunked: custom message, Flunked at: \"foo\"");
+/// let msg1 = format!("Parsing failed because a parser flunked (custom message), Failed at: \"\"");
+/// let msg2 = format!("Parsing failed because a parser flunked (custom message), Failed at: \"foo\"");
+///
 /// assert_eq!(msg1, p.parse("").unwrap_err().to_string());
 /// assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
 /// ```
@@ -2024,11 +2145,15 @@ where
 pub fn recover<'a, Toks, T, A, P>(p: P, value: A) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO: figure out why rust complains about the lifetime here
+    T: Clone + Debug,
     A: Clone + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
-    or(p, succeed(value))
+    move |input1| match p.parse(input1) {
+        Ok((input2, x)) => Ok((input2, x)),
+        Err(e) if e.caused_by_other() => Err(e),
+        Err(_) => Ok((input1, value.clone())),
+    }
 }
 
 /// Returns a default value when the given parser fails.
@@ -2059,11 +2184,15 @@ where
 pub fn recover_default<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO: same lifetime oddity as recover
+    T: Clone + Debug,
     A: Default + 'a,
     P: Parser<'a, Toks, T, A> + 'a,
 {
-    or(p, succeed_default())
+    move |input1| match p.parse(input1) {
+        Ok((input2, x)) => Ok((input2, x)),
+        Err(e) if e.caused_by_other() => Err(e),
+        Err(_) => Ok((input1, A::default())),
+    }
 }
 
 /// Wraps the return value in an `Option`, allows parsing to continue on failure.
@@ -2100,6 +2229,43 @@ where
         Ok((rest, x)) => Ok((rest, Some(x))),
         Err(e) if e.caused_by_other() => Err(e),
         Err(_) => Ok((input, None)),
+    }
+}
+
+/// Returns whether or not the parser was successful, discarding the parsed value.
+///
+/// If `p` succeeds, the parser returns `true`.
+/// If `p` fails, instead of failing the whole parsing chain, it leaves the input alone and
+/// returns `false`.
+///
+/// **Note:** if the error value produced by `p` was created with the [`ParseError::other`]
+/// function, this parser will *not* return a `None` value and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
+/// See also: [`optional`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let p = token('a').was_parsed();
+///
+/// assert_eq!(("", true), p.parse("a").unwrap());
+/// assert_eq!(("", false), p.parse("").unwrap());
+/// assert_eq!(("b", false), p.parse("b").unwrap());
+/// ```
+pub fn was_parsed<'a, Toks, T, A, P>(p: P) -> impl Parser<'a, Toks, T, bool>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+{
+    move |input| match p.parse(input) {
+        Ok((input2, _)) => Ok((input2, true)),
+        Err(e) if e.caused_by_other() => Err(e),
+        Err(_) => Ok((input, false)),
     }
 }
 
@@ -2202,7 +2368,7 @@ where
 /// This combinator may also be expressed with the `+` operator if **both** `p` and `q` are
 /// [`BoxedParser`]s.
 ///
-/// See also: [`left`], [`right`].
+/// See also: [`left`], [`right`], [`trailing`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -2250,7 +2416,7 @@ where
 /// This combinator may also be expressed with the `<<` operator if **both** `p` and `q` are
 /// [`BoxedParser`]s.
 ///
-/// See also: [`plus`], [`right`].
+/// See also: [`plus`], [`right`], [`trailing`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -2266,13 +2432,17 @@ where
 pub fn left<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO also lifetime oddity, is it map()?
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
     B: 'a,
 {
-    map(plus(p, q), |tup| tup.0)
+    move |input1| {
+        let (input2, x) = p.parse(input1)?;
+        let (input3, _) = q.parse(input2)?;
+        Ok((input3, x))
+    }
 }
 
 /// Parses with two parsers in series, returns second value
@@ -2294,7 +2464,7 @@ where
 /// This combinator may also be expressed with the `>>` operator if **both** `p` and `q` are
 /// [`BoxedParser`]s.
 ///
-/// See also: [`left`], [`plus`].
+/// See also: [`left`], [`plus`], [`trailing`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -2310,13 +2480,73 @@ where
 pub fn right<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, B>
 where
     Toks: Tokens<T> + 'a,
-    T: Clone + Debug + 'a, // TODO same as above
+    T: Clone + Debug,
     A: 'a,
     P: Parser<'a, Toks, T, A> + 'a,
     Q: Parser<'a, Toks, T, B> + 'a,
     B: 'a,
 {
-    map(plus(p, q), |tup| tup.1)
+    move |input1| {
+        let (input2, _) = p.parse(input1)?;
+        let (input3, y) = q.parse(input2)?;
+        Ok((input3, y))
+    }
+}
+
+/// Parses and returns the value of one parser, then optionally parses with another.
+///
+/// This parser will first try to parse a value with `p`.
+/// If `p` fails, then the parser fails.
+/// If `p` succeeds, the parser will try to then parse a value with `q` (from the returned input
+/// from `p`).
+/// If `q` succeeds, the corresponding input is consumed but no extra value is returned.
+/// If `q` fails, nothing else happens.
+/// If either `p` or `q` fail, then the parser fails.
+///
+/// `p` must succeed before `q` can be run, but `q` is obviously allowed to fail.
+/// They must also both operate on the same input type, though they are free to have different
+/// return types.
+///
+/// When called directly, `p` will be used first and `q` second.
+/// When called as a [method of `Parser`](Parser::trailing), the receiving parser (the `self`)
+/// is used first and the `other` parser is used second.
+///
+/// **Note:** if `q` produces an error value created with the [`ParseError::other`] function,
+/// this parser will *not* return the already-parsed element from `p` and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
+/// See also: [`left`], [`plus`], [`right`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let p = token('a').trailing(token('b').convert::<u32>());
+///
+/// assert_eq!(("", 'a'), p.parse("ab").unwrap());
+/// assert_eq!(("t", 'a'), p.parse("at").unwrap());
+/// assert_eq!(("", 'a'), p.parse("a").unwrap());
+/// assert!(p.parse("b").is_err());
+/// assert!(p.parse("ba").is_err());
+/// ```
+pub fn trailing<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, A>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+    Q: Parser<'a, Toks, T, B> + 'a,
+    B: 'a,
+{
+    move |input1| {
+        let (input2, x) = p.parse(input1)?;
+        match q.parse(input2) {
+            Ok((input3, _)) => Ok((input3, x)),
+            Err(e) if e.caused_by_other() => Err(e),
+            Err(_) => Ok((input2, x)),
+        }
+    }
 }
 
 /// Parses with the given parser an amount of times based on the provided range.
@@ -2409,7 +2639,12 @@ where
         }
 
         if values.len() < min {
-            Err(ParseError::not_enough(input, min, values.len()))
+            Err(ParseError::not_enough(
+                "Could not parse the minimum number of values",
+                input,
+                min,
+                values.len(),
+            ))
         } else {
             Ok((input, values))
         }
@@ -2808,7 +3043,9 @@ where
     T: Clone + Debug,
 {
     move |input: Toks| match input.take_one() {
-        None => Err(ParseError::empty_input()),
+        None => Err(ParseError::empty_input(
+            "Input was empty when it was not expected to be",
+        )),
         Some((rest, t)) => Ok((rest, t)),
     }
 }
@@ -2863,7 +3100,11 @@ where
     Toks: Tokens<T> + 'a,
     T: Clone + Debug + PartialEq + 'a,
 {
-    token_satisfies(move |t| *t == tok)
+    let msg = format!("couldn't find token: {:?}", tok);
+    token_satisfies(move |t| *t == tok).map_error(move |mut e| {
+        e.overwrite_details(&msg);
+        e
+    })
 }
 
 /// Parses a literal string slice.
@@ -3076,29 +3317,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_error_get_set_details() {
-        let mut e = ParseError::<&str, char>::empty_input();
-        assert_eq!(None, e.get_details());
+    fn parse_error_get_overwrite_details() {
+        let mut e = ParseError::<&str, char>::empty_input("details");
+        assert_eq!("details", e.details());
 
-        e.set_details("details1");
-        assert_eq!(Some("details1"), e.get_details());
-        e.set_details("details2");
-        assert_eq!(Some("details2"), e.get_details());
+        e.overwrite_details("details1");
+        assert_eq!("details1", e.details());
+        e.overwrite_details("details2");
+        assert_eq!("details2", e.details());
     }
 
     #[test]
     fn parse_error_loc() {
-        let e = ParseError::<&str, char>::empty_input();
-        assert_eq!(None, e.get_loc());
-        assert_eq!(None, e.get_loc_non_empty());
+        let e = ParseError::<&str, char>::empty_input("details");
+        assert_eq!(None, e.loc());
+        assert_eq!(None, e.loc_non_empty());
 
         let e = ParseError::no_parse("details", "");
-        assert_eq!(Some(""), e.get_loc());
-        assert_eq!(None, e.get_loc_non_empty());
+        assert_eq!(Some(""), e.loc());
+        assert_eq!(None, e.loc_non_empty());
 
         let e = ParseError::no_parse("details", "input");
-        assert_eq!(Some("input"), e.get_loc());
-        assert_eq!(Some("input"), e.get_loc_non_empty());
+        assert_eq!(Some("input"), e.loc());
+        assert_eq!(Some("input"), e.loc_non_empty());
     }
 
     fn make_io_error() -> Result<(), std::io::Error> {
@@ -3107,17 +3348,17 @@ mod tests {
 
     // In the future, god willing, the map_err can be replaced with just a question mark
     fn fails_with_other(input: &str) -> ParseResult<&str, char, char> {
-        let _dummy = make_io_error().map_err(|e| ParseError::other(e, input))?;
+        let _dummy = make_io_error().map_err(|e| ParseError::other("details", input, e))?;
         Ok((input, 'a')) // <--- this shouldn't happen
     }
 
     #[test]
     fn parse_error_caused_by_other() {
         let inner = make_io_error().unwrap_err();
-        let e = ParseError::<&str, char>::other(inner, "input");
+        let e = ParseError::<&str, char>::other("details", "input", inner);
         assert!(e.caused_by_other());
 
-        let e = ParseError::<&str, char>::empty_input();
+        let e = ParseError::<&str, char>::empty_input("details");
         assert!(!e.caused_by_other());
     }
 
@@ -3145,17 +3386,15 @@ mod tests {
 
         let p = fails_with_other;
         let e = p.parse("input").unwrap_err();
-        assert!(e.get_details().is_none());
         assert!(e.caused_by_other());
-        assert_eq!(Some("input"), e.get_loc());
+        assert_eq!(Some("input"), e.loc());
 
         let p = fails_with_other.map_error(|_| {
             ParseError::no_parse("details that shouldn't be here", "different input")
         });
         let e = p.parse("input").unwrap_err();
-        assert!(e.get_details().is_none());
         assert!(e.caused_by_other());
-        assert_eq!(Some("input"), e.get_loc());
+        assert_eq!(Some("input"), e.loc());
     }
 
     /*
@@ -3271,7 +3510,7 @@ mod tests {
     #[test]
     fn test_map_error() {
         let p = token('a').map_error(|mut e| {
-            e.set_details("couldn't find letter 'a'");
+            e.overwrite_details("couldn't find letter 'a'");
             e
         });
 
@@ -3280,6 +3519,18 @@ mod tests {
 
         assert_eq!(("", 'a'), p.parse("a").unwrap());
         assert_eq!(expected, p.parse("b").unwrap_err().to_string());
+    }
+
+    #[test]
+    fn test_map_error_details() {
+        let p = token('a');
+        let q = token('a').map_error_details("custom details");
+
+        let e1 = p.parse("b").unwrap_err();
+        let e2 = q.parse("b").unwrap_err();
+
+        assert_eq!("custom details", e2.details());
+        assert_ne!(e1.details(), e2.details());
     }
 
     p_test!(
@@ -3339,16 +3590,17 @@ mod tests {
     fn test_flunk_with() {
         let p = flunk_with::<&str, char, ()>("message");
 
-        let msg1 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "");
-        let msg2 = format!("Parser flunked: {}, Flunked at: \"{}\"", "message", "foo");
-        let msg3 = format!(
-            "Parser flunked: {}, Flunked at: \"{}\"",
-            "message", "anything"
-        );
+        let e_msg = p.parse("").unwrap_err().to_string();
+        assert!(e_msg.contains("message"));
+        assert!(e_msg.contains("\"\""));
 
-        assert_eq!(msg1, p.parse("").unwrap_err().to_string());
-        assert_eq!(msg2, p.parse("foo").unwrap_err().to_string());
-        assert_eq!(msg3, p.parse("anything").unwrap_err().to_string());
+        let e_msg = p.parse("foo").unwrap_err().to_string();
+        assert!(e_msg.contains("message"));
+        assert!(e_msg.contains("\"foo\""));
+
+        let e_msg = p.parse("anything").unwrap_err().to_string();
+        assert!(e_msg.contains("message"));
+        assert!(e_msg.contains("\"anything\""));
     }
 
     p_test!(
@@ -3475,6 +3727,22 @@ mod tests {
     );
 
     p_test!(
+        test_was_parsed,
+        &str,
+        bool,
+        token('a').was_parsed(),
+        vec![
+            ("a", ("", true)),
+            ("ab", ("b", true)),
+            ("abc", ("bc", true)),
+            ("", ("", false)),
+            ("b", ("b", false)),
+            ("ba", ("ba", false)),
+        ],
+        vec![],
+    );
+
+    p_test!(
         test_ensure,
         &str,
         char,
@@ -3532,6 +3800,23 @@ mod tests {
             ("abc", ("c", 'b')),
         ],
         vec!["", "a", "b", "ba", "acb",],
+    );
+
+    p_test!(
+        test_trailing,
+        &str,
+        char,
+        token('a').trailing(token('b')),
+        vec![
+            ("ab", ("", 'a')),
+            ("a", ("", 'a')),
+            ("aba", ("a", 'a')),
+            ("abb", ("b", 'a')),
+            ("abc", ("c", 'a')),
+            ("aca", ("ca", 'a')),
+            ("acb", ("cb", 'a')),
+        ],
+        vec!["", "b", "ba"],
     );
 
     type PR = (Bound<usize>, Bound<usize>);
