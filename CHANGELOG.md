@@ -14,7 +14,7 @@ nothing so far
 ### Added
 
 - Changelog
-- Example: JSON parser
+- Example: JSON lexer + parser
 - `ParseError::map_error_details`: a more convenient function for changing error details
 - `trailing` + method version: a combinator similar to `left`, but allows the second parser to fail
 - `was_parsed` + method version: a combinator similar to `optional` that returns a boolean
