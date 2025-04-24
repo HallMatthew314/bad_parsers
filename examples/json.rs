@@ -192,7 +192,7 @@ fn lex_lexeme<'a>() -> impl Parser<'a, &'a str, char, JToken> {
 }
 
 fn lex_json<'a>() -> impl Parser<'a, &'a str, char, Vec<JToken>> {
-    lex_lexeme().sep_by(ws()).within(ws())
+    lex_lexeme().within_and_sep_by1(ws())
 }
 
 fn json_null<'a>() -> impl Parser<'a, &'a [JToken], JToken, Json> {
