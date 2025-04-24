@@ -1351,6 +1351,31 @@ where
         sep_by(self, other)
     }
 
+    /// Method version of [`within_and_sep_by`]
+    fn within_and_sep_by<Q, B>(self, other: Q) -> impl Parser<'a, Toks, T, Vec<A>>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+        Q: Parser<'a, Toks, T, B> + 'a,
+        B: 'a,
+    {
+        within_and_sep_by(self, other)
+    }
+
+    /// Method version of [`within_and_sep_by1`]
+    fn within_and_sep_by1<Q, B>(self, other: Q) -> impl Parser<'a, Toks, T, Vec<A>>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+        Q: Parser<'a, Toks, T, B> + 'a,
+        B: 'a,
+    {
+        within_and_sep_by1(self, other)
+    }
+
+
     /// Method version of [`within`]
     fn within<Q, B>(self, other: Q) -> impl Parser<'a, Toks, T, A>
     where
@@ -2883,6 +2908,8 @@ where
 ///
 /// **WARNING:** if `p` and `q` are able to successfully parse things *without consuming any
 /// input*, then running this parser may create an infinite loop.
+///
+/// See also: [`within_and_sep_by`].
 /// ## Examples
 /// ```
 /// use bad_parsers::{Parser, token};
@@ -2935,6 +2962,176 @@ where
         Ok((input, items))
     }
 }
+
+/// Parses one or more times with the second parser, separated by parses of the first parser.
+///
+/// This parser will first try to parse a single item with `q`.
+/// If `q` fails here, then this parser will fail.
+/// After the intial parse, this parser will repeatedly attempt to parse with `p` and then `q`
+/// in a pair.
+/// For each successful parse of `p` and `q`, this parser will keep the result of `p`.
+/// This continues until either `p` or `q` fails.
+/// If `q` fails, the input consumed by `p` is restored.
+///
+/// This combinator can be thought of as the opposite of [`sep_by`].
+/// However, this parser is able to succeed without parsing any `A` values.
+/// To ensure at least one `A` is parsed, consider using [`within_and_sep_by1`].
+///
+/// **Note:** if `p` or `q` produce an error value created with the [`ParseError::other`]
+/// function, this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
+/// When called directly, the parsed items from `p` will be kept and those of `q` are ignored.
+/// When called as a [method of `Parser`](Parser::within_and_sep_by), the receiving parser
+/// (the `self`) is used as `p` and the `other` parser is used as `q`.
+///
+/// **WARNING:** if `p` and `q` are able to successfully parse things *without consuming any
+/// input*, then running this parser may create an infinite loop.
+///
+/// See also: [`sep_by`], [`within`], [`within_and_sep_by1`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let space = token(' ').mult();
+/// let p = token('a').within_and_sep_by(space);
+///
+/// assert_eq!(("", vec![]), p.parse("").unwrap());
+/// assert_eq!(("", vec![]), p.parse("  ").unwrap());
+/// assert_eq!(("", vec!['a']), p.parse(" a ").unwrap());
+/// assert_eq!(("", vec!['a']), p.parse(" a").unwrap());
+/// assert_eq!(("", vec!['a']), p.parse("a ").unwrap());
+/// assert_eq!(("", vec!['a']), p.parse("a").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse(" a a ").unwrap());
+/// assert_eq!(("b ", vec!['a', 'a']), p.parse(" a a  b ").unwrap());
+/// assert_eq!(("b a a ", vec![]), p.parse(" b a a ").unwrap());
+/// ```
+pub fn within_and_sep_by<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, Vec<A>>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+    Q: Parser<'a, Toks, T, B> + 'a,
+    B: 'a,
+{
+    move |mut input| {
+        let (next_input, _sep) = q.parse(input)?;
+        let mut items = vec![];
+        input = next_input;
+
+        loop {
+            match p.parse(input) {
+                Err(e) if e.caused_by_other() => {
+                    return Err(e);
+                }
+                Err(_) => {
+                    break;
+                }
+                Ok((tmp_input, x)) => match q.parse(tmp_input) {
+                    Err(e) if e.caused_by_other() => {
+                        return Err(e);
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                    Ok((next_input, _sep)) => {
+                        items.push(x);
+                        input = next_input;
+                    }
+                },
+            }
+        }
+        Ok((input, items))
+    }
+}
+
+/// Parses one or more times with the second parser, separated by at least one parse of the first parser.
+///
+/// This parser will first try to parse a single item with `q`.
+/// If `q` fails here, then this parser will fail.
+/// After the intial parse, this parser will repeatedly attempt to parse with `p` and then `q`
+/// in a pair.
+/// For each successful parse of `p` and `q`, this parser will keep the result of `p`.
+/// This continues until either `p` or `q` fails.
+/// If `q` fails, the input consumed by `p` is restored.
+/// If `p` does not succeed at least once, then this parser will fail.
+///
+/// **Note:** if `p` or `q` produce an error value created with the [`ParseError::other`]
+/// function, this parser will *not* return the already-parsed elements and will fail instead.
+/// This is because such an error was caused by factors outside of the parser chain and
+/// should not be recovered from.
+/// See the documentation for [`ParseError`] more information.
+///
+/// When called directly, the parsed items from `p` will be kept and those of `q` are ignored.
+/// When called as a [method of `Parser`](Parser::within_and_sep_by), the receiving parser
+/// (the `self`) is used as `p` and the `other` parser is used as `q`.
+///
+/// **WARNING:** if `p` and `q` are able to successfully parse things *without consuming any
+/// input*, then running this parser may create an infinite loop.
+///
+/// See also: [`sep_by`], [`within`], [`within_and_sep_by`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, token};
+///
+/// let space = token(' ').mult();
+/// let p = token('a').within_and_sep_by1(space);
+///
+/// assert_eq!(("", vec!['a']), p.parse(" a ").unwrap());
+/// assert_eq!(("", vec!['a']), p.parse(" a").unwrap());
+/// assert_eq!(("", vec!['a']), p.parse("a ").unwrap());
+/// assert_eq!(("", vec!['a']), p.parse("a").unwrap());
+/// assert_eq!(("", vec!['a', 'a']), p.parse(" a a ").unwrap());
+/// assert_eq!(("b ", vec!['a', 'a']), p.parse(" a a  b ").unwrap());
+/// assert!(p.parse("").is_err());
+/// assert!(p.parse("  ").is_err());
+/// assert!(p.parse(" b a a ").is_err());
+/// ```
+pub fn within_and_sep_by1<'a, Toks, T, A, P, Q, B>(p: P, q: Q) -> impl Parser<'a, Toks, T, Vec<A>>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+    Q: Parser<'a, Toks, T, B> + 'a,
+    B: 'a,
+{
+    move |mut input| {
+        let (next_input1, _sep) = q.parse(input)?;
+        let (next_input2, x) = p.parse(next_input1)?;
+        let (next_input3, _sep) = q.parse(next_input2)?;
+        let mut items = vec![x];
+        input = next_input3;
+
+        loop {
+            match p.parse(input) {
+                Err(e) if e.caused_by_other() => {
+                    return Err(e);
+                }
+                Err(_) => {
+                    break;
+                }
+                Ok((tmp_input, x)) => match q.parse(tmp_input) {
+                    Err(e) if e.caused_by_other() => {
+                        return Err(e);
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                    Ok((next_input, _sep)) => {
+                        items.push(x);
+                        input = next_input;
+                    }
+                },
+            }
+        }
+        Ok((input, items))
+    }
+}
+
 
 /// Parses the value of the first parser in-between two parses of the second parser.
 ///
@@ -4041,6 +4238,36 @@ mod tests {
             ("aababa", ("ababa", vec!['a'])),
         ],
         vec!["", "b", "ba", "bba", "xababa",],
+    );
+
+    p_test!(
+        test_within_and_sep_by,
+        &str,
+        Vec<char>,
+        token('a').within_and_sep_by(token('_').mult()),
+        vec![
+            ("", ("", vec![])),
+            ("_", ("", vec![])),
+            ("__a__", ("", vec!['a'])),
+            ("_a_aa__", ("", vec!['a', 'a', 'a'])),
+            ("aaa", ("", vec!['a', 'a', 'a'])),
+            ("_a_aba__", ("ba__", vec!['a', 'a'])),
+        ],
+        vec![],
+    );
+
+    p_test!(
+        test_within_and_sep_by1,
+        &str,
+        Vec<char>,
+        token('a').within_and_sep_by1(token('_').mult()),
+        vec![
+            ("__a__", ("", vec!['a'])),
+            ("_a_aa__", ("", vec!['a', 'a', 'a'])),
+            ("aaa", ("", vec!['a', 'a', 'a'])),
+            ("_a_aba__", ("ba__", vec!['a', 'a'])),
+        ],
+        vec!["", "___", "_b_", "_b_aa_a_a_a_",],
     );
 
     p_test!(
