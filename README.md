@@ -54,3 +54,11 @@ fn main() {
 ## Contributing
 
 Please don't.
+
+## Credit Where it's Due
+
+This library owes its existence to:
+
+ - [This video](https://www.youtube.com/watch?v=N9RUqGYuGfw) for explaining the concept of parser combinators.
+ - [This article](https://bodil.lol/parser-combinators/) for providing the parser trait framework that this library uses.
+
