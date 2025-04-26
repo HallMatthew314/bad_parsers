@@ -390,6 +390,8 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
 
+pub mod lexing;
+
 #[derive(Debug)]
 enum ErrorType {
     NoParse,

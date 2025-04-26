@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use bad_parsers::{
-    eof, first_of, lazy, string, token, token_satisfies, ParseError, Parser, Tokens,
+    eof, first_of, lazy, token, token_satisfies, ParseError, Parser, Tokens,
 };
+use bad_parsers::simple_lexer;
 
 // JSON is being parsed according to the grammar at: https://www.json.org/json-en.html
 // It's not exactly produciton-ready, but it works well enough
@@ -77,29 +78,19 @@ fn ws<'a>() -> impl Parser<'a, &'a str, char, ()> {
     token_satisfies(is_whitespace).mult().ignore()
 }
 
-macro_rules! lex_simple {
-    ($name:ident, $pat:literal, $tok:ident) => {
-        fn $name<'a>() -> impl Parser<'a, &'a str, char, JToken> {
-            string($pat).replace(JToken::$tok)
-        }
-    };
-}
-lex_simple!(lex_true, "true", True);
-lex_simple!(lex_false, "false", False);
-lex_simple!(lex_null, "null", Null);
-lex_simple!(lex_open_curly, "{", OpenCurly);
-lex_simple!(lex_close_curly, "}", CloseCurly);
-lex_simple!(lex_colon, ":", Colon);
-lex_simple!(lex_comma, ",", Comma);
-lex_simple!(lex_open_square, "[", OpenSquare);
-lex_simple!(lex_close_square, "]", CloseSquare);
-lex_simple!(lex_minus, "-", Minus);
-lex_simple!(lex_plus, "+", Plus);
-lex_simple!(lex_dot, ".", Dot);
-
-fn lex_e<'a>() -> impl Parser<'a, &'a str, char, JToken> {
-    token('e').or(token('E')).replace(JToken::E)
-}
+simple_lexer!(lex_true, "true", JToken, JToken::True);
+simple_lexer!(lex_false, "false", JToken, JToken::False);
+simple_lexer!(lex_null, "null", JToken, JToken::Null);
+simple_lexer!(lex_open_curly, "{", JToken, JToken::OpenCurly);
+simple_lexer!(lex_close_curly, "}", JToken, JToken::CloseCurly);
+simple_lexer!(lex_colon, ":", JToken, JToken::Colon);
+simple_lexer!(lex_comma, ",", JToken, JToken::Comma);
+simple_lexer!(lex_open_square, "[", JToken, JToken::OpenSquare);
+simple_lexer!(lex_close_square, "]", JToken, JToken::CloseSquare);
+simple_lexer!(lex_minus, "-", JToken, JToken::Minus);
+simple_lexer!(lex_plus, "+", JToken, JToken::Plus);
+simple_lexer!(lex_dot, ".", JToken, JToken::Dot);
+simple_lexer!(lex_e, "e", "E", JToken, JToken::E);
 
 fn lex_digit_string<'a>() -> impl Parser<'a, &'a str, char, JToken> {
     token_satisfies(char::is_ascii_digit)
