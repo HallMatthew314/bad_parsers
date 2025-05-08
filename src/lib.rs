@@ -398,6 +398,7 @@ enum ErrorType {
     Flunk,
     NotEnough { needed: usize, got: usize },
     Other { cause: Box<dyn std::error::Error> },
+    OtherParser { rendered_error: String, },
 }
 
 /// The `Err` type of [`ParseResult`].
@@ -540,7 +541,7 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// Failing with this error type will cause parsers produced by certain combinators in
     /// this library to fail in situations where they would otherwise be unaffected.
-    /// The complete (though not strictly up-to-date) list of such combinators is:
+    /// Such combinators include (but are not limited to):
     /// * [`at_least`]
     /// * [`at_most`]
     /// * [`first_of!`]
@@ -564,6 +565,83 @@ impl<Toks, T> ParseError<Toks, T> {
             },
             details,
             Some(loc),
+        )
+    }
+
+    /// Signals that another parser of a different type caused parsing to fail.
+    ///
+    /// This variant is primarily intended to be used when a parser cannot be run
+    /// due to another parser *of a different type* failing beforehand.
+    ///
+    /// The primary use case for this is when a lexer needs to generate a sequence of
+    /// tokens for another parser to parse from.
+    /// Using this variant side-steps the type mismatch between the two parsers' error values.
+    ///
+    /// Error values created with this function cannot be modified via [`map_error`], as it
+    /// would not be a good idea to discard such error information.
+    ///
+    /// Failing with this error type will cause parsers produced by certain combinators in
+    /// this library to fail in situations where they would otherwise be unaffected.
+    /// Such combinators include (but are not limited to):
+    /// * [`at_least`]
+    /// * [`at_most`]
+    /// * [`first_of!`]
+    /// * [`in_range`]
+    /// * [`mult`]
+    /// * [`mult1`]
+    /// * [`optional`]
+    /// * [`or`]
+    /// * [`recover`]
+    /// * [`recover_default`]
+    /// * [`sep_by`]
+    /// * [`trailing`]
+    /// * [`was_parsed`]
+    /// ## Examples:
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, ParseResult, string, token};
+    ///
+    /// #[derive(Clone, Debug, PartialEq, Eq)]
+    /// enum MyToken {
+    ///     Foo,
+    /// }
+    ///
+    /// // Note that lex_foo and parse_foo have different types.
+    /// fn lex_foo<'a>() -> impl Parser<'a, &'a str, char, MyToken> {
+    ///     string("foo").replace(MyToken::Foo)
+    /// }
+    ///
+    /// fn parse_foo<'a>() -> impl Parser<'a, &'a [MyToken], MyToken, bool> {
+    ///     token(MyToken::Foo).replace(true)
+    /// }
+    ///
+    /// fn parse_foo_from_str<'a>(input: &'a str) -> ParseResult<'a, &'a str, char, bool> {
+    ///     let lex = lex_foo().mult1();
+    ///     let (remaining, tokens) = lex.parse(input)?;
+    ///     let t_slice = tokens.as_slice();
+    ///     let p = parse_foo();
+    ///     match p.parse(t_slice) {
+    ///         Ok((_, x)) => Ok((remaining, x)),
+    ///         Err(e) => Err(ParseError::other_parser(
+    ///             "lexer succeed but parser failed",
+    ///             e,
+    ///         )),
+    ///     }
+    /// }
+    ///
+    /// assert_eq!(("", true), parse_foo_from_str("foo").unwrap());
+    /// assert!(parse_foo_from_str("bar").is_err());
+    /// ```
+    pub fn other_parser<PToks, PT>(details: &str, parse_error: ParseError<PToks, PT>) -> Self
+    where
+        PToks: Tokens<PT>,
+        PT: Clone + Debug,
+    {
+        Self::construct_generic(
+            ErrorType::OtherParser {
+                rendered_error: parse_error.to_string(),
+            },
+            details,
+            None,
         )
     }
 
@@ -744,6 +822,9 @@ where
             ErrorType::Other { cause } => &format!("An error occurred while parsing: {}", cause),
             ErrorType::Flunk => "Parsing failed because a parser flunked",
             ErrorType::NoParse => "Parsing was unsuccessful",
+            ErrorType::OtherParser { rendered_error } => &format!(
+                "Another parser with a different type failed: {}", rendered_error,
+            ),
             ErrorType::NotEnough { needed, got } => &format!(
                 "Parser needed to parse {} elements, but only parsed {}",
                 needed, got,
@@ -1400,6 +1481,21 @@ where
         C: 'a,
     {
         between(self, left, right)
+    }
+
+    /// Method version of [`then_parse`]
+    fn then_parse<F, Toks2, T2, Q, B>(self, other: Q, f: F) -> impl Parser<'a, Toks, T, B>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+        F: Fn(&A) -> Toks2 + 'a,
+        Toks2: Tokens<T2> + 'a,
+        T2: Clone + Debug,
+        Q: Parser<'a, Toks2, T2, B> + 'a,
+        B: 'a,
+    {
+        then_parse(self, other, f)
     }
 }
 
@@ -3217,6 +3313,84 @@ where
         let (input3, x) = p.parse(input2)?;
         let (input4, _) = right.parse(input3)?;
         Ok((input4, x))
+    }
+}
+
+/// Parse one input type to get another, then parse from the second input.
+///
+/// Not to be confused with [`and_then`].
+///
+/// This parser will first use `p` to parse a value that can be turned into another parser's
+/// input.
+/// If successful, the value will be passed to the given function to create the second input,
+/// which will then be parsed from by `q`.
+/// If `q` succeeds, this parser will return the second parsed value, and the remaining input
+/// from the first parser.
+/// If either `p` or `q` fail, then this parser will fail.
+///
+/// The primary use case of this combinator is to conveniently combine a lexer and a parser
+/// into a single object.
+/// Such a combination can be awkward due to the different input types of the two parsers.
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, string, then_parse, token};
+///
+/// #[derive(Debug, Clone, PartialEq, Eq)]
+/// enum MyToken {
+///     Foo,
+/// }
+///
+/// #[derive(Debug, PartialEq)]
+/// struct Foo;
+///
+/// fn lex_foo<'a>() -> impl Parser<'a, &'a str, char, MyToken> {
+///     string("foo").replace(MyToken::Foo)
+/// }
+///
+/// fn p_foo<'a>() -> impl Parser<'a, &'a [MyToken], MyToken, Foo> {
+///     token(MyToken::Foo).map(|_| Foo)
+/// }
+///
+/// fn convert<'a>(v: &'a Vec<MyToken>) -> &'a [MyToken] {
+///     v.as_slice()
+/// }
+///
+/// fn foo<'a>() -> impl Parser<'a, &'a str, char, Foo> {
+///     //lex_foo().mult1().then_parse(p_foo(), convert)
+///     then_parse(
+///         lex_foo().mult1(),
+///         p_foo(),
+///         |v: &'a Vec<MyToken>| v.as_slice(),
+///     )
+/// }
+///
+/// assert_eq!(("", Foo), foo().parse("foo").unwrap());
+/// ```
+pub fn then_parse<'a, Toks, T, A, P, F, Toks2, T2, Q, B>(
+    p: P,
+    q: Q,
+    f: F,
+) -> impl Parser<'a, Toks, T, B>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    Toks2: Tokens<T2> + 'a,
+    T2: Clone + Debug,
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+    Q: Parser<'a, Toks2, T2, B> + 'a,
+    F: Fn(&A) -> Toks2 + 'a,
+{
+    move |input_toks| {
+        let (remaining_toks, a) = p.parse(input_toks)?;
+        let input_toks2 = f(&a);
+        match q.parse(input_toks2) {
+            Ok((_remaining_toks2, b)) => Ok((remaining_toks, b)),
+            Err(e) => Err(ParseError::other_parser(
+                "first step succeeded, second failed",
+                e
+            )),
+        }
     }
 }
 
