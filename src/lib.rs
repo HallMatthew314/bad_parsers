@@ -573,29 +573,9 @@ impl<Toks, T> ParseError<Toks, T> {
     /// This variant is primarily intended to be used when a parser cannot be run
     /// due to another parser *of a different type* failing beforehand.
     ///
-    /// The primary use case for this is when a lexer needs to generate a sequence of
-    /// tokens for another parser to parse from.
-    /// Using this variant side-steps the type mismatch between the two parsers' error values.
+    /// This variant is primarily intended to be used when parsing fails due to another
+    /// parser failing that has an incompatible input type.
     ///
-    /// Error values created with this function cannot be modified via [`map_error`], as it
-    /// would not be a good idea to discard such error information.
-    ///
-    /// Failing with this error type will cause parsers produced by certain combinators in
-    /// this library to fail in situations where they would otherwise be unaffected.
-    /// Such combinators include (but are not limited to):
-    /// * [`at_least`]
-    /// * [`at_most`]
-    /// * [`first_of!`]
-    /// * [`in_range`]
-    /// * [`mult`]
-    /// * [`mult1`]
-    /// * [`optional`]
-    /// * [`or`]
-    /// * [`recover`]
-    /// * [`recover_default`]
-    /// * [`sep_by`]
-    /// * [`trailing`]
-    /// * [`was_parsed`]
     /// ## Examples:
     /// ```
     /// use bad_parsers::{Parser, ParseError, ParseResult, string, token};
@@ -605,20 +585,26 @@ impl<Toks, T> ParseError<Toks, T> {
     ///     Foo,
     /// }
     ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct Foo;
+    ///
     /// // Note that lex_foo and parse_foo have different types.
     /// fn lex_foo<'a>() -> impl Parser<'a, &'a str, char, MyToken> {
     ///     string("foo").replace(MyToken::Foo)
     /// }
     ///
-    /// fn parse_foo<'a>() -> impl Parser<'a, &'a [MyToken], MyToken, bool> {
-    ///     token(MyToken::Foo).replace(true)
+    /// fn parse_foo<'a>() -> impl Parser<'a, &'a [MyToken], MyToken, Foo> {
+    ///     token(MyToken::Foo).map(|_| Foo)
     /// }
     ///
-    /// fn parse_foo_from_str<'a>(input: &'a str) -> ParseResult<'a, &'a str, char, bool> {
+    /// fn parse_foo_from_str<'a>(input: &'a str) -> ParseResult<'a, &'a str, char, Foo> {
     ///     let lex = lex_foo().mult1();
     ///     let (remaining, tokens) = lex.parse(input)?;
+    ///
     ///     let t_slice = tokens.as_slice();
     ///     let p = parse_foo();
+    ///
+    ///     // second parser error needs to be converted
     ///     match p.parse(t_slice) {
     ///         Ok((_, x)) => Ok((remaining, x)),
     ///         Err(e) => Err(ParseError::other_parser(
@@ -628,13 +614,13 @@ impl<Toks, T> ParseError<Toks, T> {
     ///     }
     /// }
     ///
-    /// assert_eq!(("", true), parse_foo_from_str("foo").unwrap());
+    /// assert_eq!(("", Foo), parse_foo_from_str("foo").unwrap());
     /// assert!(parse_foo_from_str("bar").is_err());
     /// ```
-    pub fn other_parser<PToks, PT>(details: &str, parse_error: ParseError<PToks, PT>) -> Self
+    pub fn other_parser<Toks2, T2>(details: &str, parse_error: ParseError<Toks2, T2>) -> Self
     where
-        PToks: Tokens<PT>,
-        PT: Clone + Debug,
+        Toks2: Tokens<T2>,
+        T2: Clone + Debug,
     {
         Self::construct_generic(
             ErrorType::OtherParser {
