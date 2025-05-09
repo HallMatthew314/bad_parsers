@@ -386,6 +386,7 @@
 //! assert_ne!("time taken", "well-spent");
 //! ```
 //! Oh.
+use std::cmp;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
@@ -1038,7 +1039,7 @@ where
     }
 
     fn preview(&self) -> String {
-        let preview_end: usize = 8;
+        let preview_end: usize = cmp::min(self.len(), 8);
         format!("{:?}", &self[..preview_end])
     }
 }
