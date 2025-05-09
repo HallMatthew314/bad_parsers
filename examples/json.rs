@@ -351,15 +351,21 @@ fn json_value<'a>() -> impl Parser<'a, &'a [JToken], JToken, Json> {
 }
 
 // yes, this discards all of the error information, i don't care
-fn parse_json(input_string: &str) -> Option<Json> {
+fn parse_json(input_string: &str) -> Result<Json, ParseError<&str, char>> {
     let lex = lex_json();
     //println!("About to lex");
-    let tokens = lex.parse(input_string).ok()?.1;
+    let tokens = lex.parse(input_string)?.1;
     //println!("Got tokens: {:?}", tokens);
 
     //println!("About to parse");
     let p = json_value().left(eof());
-    p.parse(tokens.as_slice()).ok().map(|tup| tup.1)
+    match p.parse(tokens.as_slice()) {
+        Ok((_, j)) => Ok(j),
+        Err(e) => Err(ParseError::other_parser(
+            "JSON lexing succeeded but parsing failed",
+            e
+        ))
+    }
 }
 
 fn main() {
@@ -371,9 +377,9 @@ fn main() {
 mod tests {
     use super::*;
 
-    macro_rules! assert_none {
+    macro_rules! assert_err {
         ($e:expr) => {
-            assert!($e.is_none());
+            assert!($e.is_err());
         };
     }
 
@@ -382,10 +388,10 @@ mod tests {
         assert_eq!(Json::Null, parse_json("null").unwrap());
         assert_eq!(Json::Null, parse_json("null_extra").unwrap());
 
-        assert_none!(parse_json(""));
-        assert_none!(parse_json("nUll"));
-        assert_none!(parse_json("nil"));
-        assert_none!(parse_json("Null"));
+        assert_err!(parse_json(""));
+        assert_err!(parse_json("nUll"));
+        assert_err!(parse_json("nil"));
+        assert_err!(parse_json("Null"));
     }
 
     #[test]
@@ -395,11 +401,11 @@ mod tests {
         assert_eq!(Json::Bool(true), parse_json("true_extra").unwrap());
         assert_eq!(Json::Bool(false), parse_json("false_extra").unwrap());
 
-        assert_none!(parse_json(""));
-        assert_none!(parse_json("frue"));
-        assert_none!(parse_json("tralse"));
-        assert_none!(parse_json("False"));
-        assert_none!(parse_json("True"));
+        assert_err!(parse_json(""));
+        assert_err!(parse_json("frue"));
+        assert_err!(parse_json("tralse"));
+        assert_err!(parse_json("False"));
+        assert_err!(parse_json("True"));
     }
 
     #[test]
@@ -429,14 +435,14 @@ mod tests {
         assert_eq!(Json::Float(-1234.0), parse_json("-12.34e2").unwrap());
         assert_eq!(Json::Float(1234.0), parse_json("12.34E2").unwrap());
         assert_eq!(Json::Float(-1234.0), parse_json("-12.34E2").unwrap());
-        assert_none!(parse_json("12.34+2"));
-        assert_none!(parse_json("-12.34+2"));
+        assert_err!(parse_json("12.34+2"));
+        assert_err!(parse_json("-12.34+2"));
         assert_eq!(Json::Float(1234.0), parse_json("12.34e+2").unwrap());
         assert_eq!(Json::Float(-1234.0), parse_json("-12.34e+2").unwrap());
         assert_eq!(Json::Float(1234.0), parse_json("12.34E+2").unwrap());
         assert_eq!(Json::Float(-1234.0), parse_json("-12.34E+2").unwrap());
-        assert_none!(parse_json("12.34-2"));
-        assert_none!(parse_json("-12.34-2"));
+        assert_err!(parse_json("12.34-2"));
+        assert_err!(parse_json("-12.34-2"));
         assert_eq!(Json::Float(0.1234), parse_json("12.34e-2").unwrap());
         assert_eq!(Json::Float(-0.1234), parse_json("-12.34e-2").unwrap());
         assert_eq!(Json::Float(0.1234), parse_json("12.34E-2").unwrap());
@@ -448,24 +454,24 @@ mod tests {
         assert_eq!(Json::Float(-123400.0), parse_json("-1234e2").unwrap());
         assert_eq!(Json::Float(123400.0), parse_json("1234E2").unwrap());
         assert_eq!(Json::Float(-123400.0), parse_json("-1234E2").unwrap());
-        assert_none!(parse_json("1234+2"));
-        assert_none!(parse_json("-1234+2"));
+        assert_err!(parse_json("1234+2"));
+        assert_err!(parse_json("-1234+2"));
         assert_eq!(Json::Float(123400.0), parse_json("1234e+2").unwrap());
         assert_eq!(Json::Float(-123400.0), parse_json("-1234e+2").unwrap());
         assert_eq!(Json::Float(123400.0), parse_json("1234E+2").unwrap());
         assert_eq!(Json::Float(-123400.0), parse_json("-1234E+2").unwrap());
-        assert_none!(parse_json("1234-2"));
-        assert_none!(parse_json("-1234-2"));
+        assert_err!(parse_json("1234-2"));
+        assert_err!(parse_json("-1234-2"));
         assert_eq!(Json::Float(12.34), parse_json("1234e-2").unwrap());
         assert_eq!(Json::Float(-12.34), parse_json("-1234e-2").unwrap());
         assert_eq!(Json::Float(12.34), parse_json("1234E-2").unwrap());
         assert_eq!(Json::Float(-12.34), parse_json("-1234E-2").unwrap());
 
         // only 'zero' values can begin their whole component with zero:
-        assert_none!(parse_json("01"));
-        assert_none!(parse_json("01.0"));
-        assert_none!(parse_json("-01"));
-        assert_none!(parse_json("-01.0e4"));
+        assert_err!(parse_json("01"));
+        assert_err!(parse_json("01.0"));
+        assert_err!(parse_json("-01"));
+        assert_err!(parse_json("-01.0e4"));
 
         // correct handling of values out of range of i64
         let i64min_str = "-9223372036854775808";
@@ -474,8 +480,8 @@ mod tests {
             parse_json(i64min_str).unwrap()
         );
         let i64min_minus1_str = "-9223372036854775809";
-        assert_none!(parse_json(i64min_minus1_str));
-        assert_none!(parse_json(
+        assert_err!(parse_json(i64min_minus1_str));
+        assert_err!(parse_json(
             "-9999999999999999999999999999999999999999999999999"
         ));
         let i64max_str = "9223372036854775807";
@@ -484,8 +490,8 @@ mod tests {
             parse_json(i64max_str).unwrap()
         );
         let i64max_plus1_str = "9223372036854775808"; //-1.7976931348623157E+308f64
-        assert_none!(parse_json(i64max_plus1_str));
-        assert_none!(parse_json(
+        assert_err!(parse_json(i64max_plus1_str));
+        assert_err!(parse_json(
             "9999999999999999999999999999999999999999999999999"
         ));
 
@@ -523,27 +529,27 @@ mod tests {
         assert_eq!(Json::String("Σ".into()), parse_json(r#""\u03A3""#).unwrap());
 
         // un-escaped control characters
-        assert_none!(parse_json("\"\0\""));
-        assert_none!(parse_json("\"\n\""));
-        assert_none!(parse_json("\"\u{1B}\""));
+        assert_err!(parse_json("\"\0\""));
+        assert_err!(parse_json("\"\n\""));
+        assert_err!(parse_json("\"\u{1B}\""));
 
         // invalid escape sequences
-        assert_none!(parse_json(r#""\""#));
-        assert_none!(parse_json(r#""\j""#));
-        assert_none!(parse_json(r#""\0""#));
-        assert_none!(parse_json(r#""\xab""#));
+        assert_err!(parse_json(r#""\""#));
+        assert_err!(parse_json(r#""\j""#));
+        assert_err!(parse_json(r#""\0""#));
+        assert_err!(parse_json(r#""\xab""#));
 
         // invalid unicode codepoints
-        assert_none!(parse_json(r#""\uD800""#));
-        assert_none!(parse_json(r#""\uDFFF""#));
-        assert_none!(parse_json(r#""\uDE01""#));
+        assert_err!(parse_json(r#""\uD800""#));
+        assert_err!(parse_json(r#""\uDFFF""#));
+        assert_err!(parse_json(r#""\uDE01""#));
     }
 
     #[test]
     fn example_json_test_array() {
         assert_eq!(Json::Array(vec![]), parse_json("[]").unwrap());
         assert_eq!(Json::Array(vec![]), parse_json("[  ]").unwrap());
-        assert_none!(parse_json("[  ]extra"));
+        assert_err!(parse_json("[  ]extra"));
         assert_eq!(
             Json::Array(vec![Json::Null]),
             parse_json("[ null]").unwrap()
@@ -635,17 +641,17 @@ mod tests {
         assert_eq!(a!(), parse_json("[ null , null]").unwrap());
         assert_eq!(a!(), parse_json("[ null , null ]").unwrap());
 
-        assert_none!(parse_json(r#""#));
-        assert_none!(parse_json("[ bhsrlre ]"));
-        assert_none!(parse_json(r#"[ "oops\", "forgot the closing bracket" "#));
-        assert_none!(parse_json(r#" "forgot the opening bracket too" ]"#));
-        assert_none!(parse_json(r#" "are brackets", " even real?" "#));
+        assert_err!(parse_json(r#""#));
+        assert_err!(parse_json("[ bhsrlre ]"));
+        assert_err!(parse_json(r#"[ "oops\", "forgot the closing bracket" "#));
+        assert_err!(parse_json(r#" "forgot the opening bracket too" ]"#));
+        assert_err!(parse_json(r#" "are brackets", " even real?" "#));
 
         // no trailing commas
-        assert_none!(parse_json("[ , ]"));
-        assert_none!(parse_json("[ 8, ]"));
-        assert_none!(parse_json("[8, 9 10,]"));
-        assert_none!(parse_json("[8, [9,], 10]"));
+        assert_err!(parse_json("[ , ]"));
+        assert_err!(parse_json("[ 8, ]"));
+        assert_err!(parse_json("[8, 9 10,]"));
+        assert_err!(parse_json("[8, [9,], 10]"));
     }
 
     #[test]
@@ -718,10 +724,10 @@ mod tests {
             .unwrap()
         );
 
-        assert_none!(parse_json(r#""#));
-        assert_none!(parse_json(r#" {"oh": "no" "#));
-        assert_none!(parse_json(r#" "it's happening": "again" } "#));
-        assert_none!(parse_json(r#" "why am i":"like this" "#));
+        assert_err!(parse_json(r#""#));
+        assert_err!(parse_json(r#" {"oh": "no" "#));
+        assert_err!(parse_json(r#" "it's happening": "again" } "#));
+        assert_err!(parse_json(r#" "why am i":"like this" "#));
 
         // internal whitespace is ok
         macro_rules! o {
@@ -736,10 +742,10 @@ mod tests {
         assert_eq!(o!(), parse_json(r#"{ "one" : 1 }"#).unwrap());
 
         // no trailing commas
-        assert_none!(parse_json("{,}"));
-        assert_none!(parse_json(r#"{ "one":1, }"#));
-        assert_none!(parse_json(r#"{ "one":1, "two":2, "three":3 , }"#));
-        assert_none!(parse_json(
+        assert_err!(parse_json("{,}"));
+        assert_err!(parse_json(r#"{ "one":1, }"#));
+        assert_err!(parse_json(r#"{ "one":1, "two":2, "three":3 , }"#));
+        assert_err!(parse_json(
             r#"{
             "one":1,
             "two": {
