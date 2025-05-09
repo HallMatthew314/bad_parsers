@@ -571,12 +571,17 @@ impl<Toks, T> ParseError<Toks, T> {
 
     /// Signals that another parser of a different type caused parsing to fail.
     ///
-    /// This variant is primarily intended to be used when a parser cannot be run
-    /// due to another parser *of a different type* failing beforehand.
-    ///
     /// This variant is primarily intended to be used when parsing fails due to another
     /// parser failing that has an incompatible input type.
     ///
+    /// Due to the type mis-match as well as lifetime limitations, the provided error value
+    /// is rendered into a string, discarding unique values that the error may have.
+    ///
+    /// This most common use case for this error is trying to lex and then parse something
+    /// in a single function.
+    /// The lexer and parser will have different error types, so converting the parser's
+    /// error value to that of the lexer with this function allows for a [`ParseError`] to
+    /// be returned.
     /// ## Examples:
     /// ```
     /// use bad_parsers::{Parser, ParseError, ParseResult, string, token};
