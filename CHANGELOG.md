@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `within_and_sep_by` and `within_and_sep_by1`, similar combinators to `sep_by` but they work in the opposite way.
+- `ParseError::other_parser`, allows forwarding error values between parsers with different input types
+
+### Fixed
+
+- fixed panic when calling `Tokens::preview` on slice types that have less than 8 elements
+
+### Non-breaking changes
+
+- various small changes to documentation
 
 ## [0.2.0-unstable]
 

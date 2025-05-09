@@ -386,6 +386,7 @@
 //! assert_ne!("time taken", "well-spent");
 //! ```
 //! Oh.
+use std::cmp;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::ops::{Add, BitOr, Bound, Deref, Mul, RangeBounds, Shl, Shr};
@@ -398,6 +399,7 @@ enum ErrorType {
     Flunk,
     NotEnough { needed: usize, got: usize },
     Other { cause: Box<dyn std::error::Error> },
+    OtherParser { rendered_error: String, },
 }
 
 /// The `Err` type of [`ParseResult`].
@@ -540,7 +542,7 @@ impl<Toks, T> ParseError<Toks, T> {
     ///
     /// Failing with this error type will cause parsers produced by certain combinators in
     /// this library to fail in situations where they would otherwise be unaffected.
-    /// The complete (though not strictly up-to-date) list of such combinators is:
+    /// Such combinators include (but are not limited to):
     /// * [`at_least`]
     /// * [`at_most`]
     /// * [`first_of!`]
@@ -564,6 +566,74 @@ impl<Toks, T> ParseError<Toks, T> {
             },
             details,
             Some(loc),
+        )
+    }
+
+    /// Signals that another parser of a different type caused parsing to fail.
+    ///
+    /// This variant is primarily intended to be used when parsing fails due to another
+    /// parser failing that has an incompatible input type.
+    ///
+    /// Due to the type mis-match as well as lifetime limitations, the provided error value
+    /// is rendered into a string, discarding unique values that the error may have.
+    ///
+    /// This most common use case for this error is trying to lex and then parse something
+    /// in a single function.
+    /// The lexer and parser will have different error types, so converting the parser's
+    /// error value to that of the lexer with this function allows for a [`ParseError`] to
+    /// be returned.
+    /// ## Examples:
+    /// ```
+    /// use bad_parsers::{Parser, ParseError, ParseResult, string, token};
+    ///
+    /// #[derive(Clone, Debug, PartialEq, Eq)]
+    /// enum MyToken {
+    ///     Foo,
+    /// }
+    ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct Foo;
+    ///
+    /// // Note that lex_foo and parse_foo have different types.
+    /// fn lex_foo<'a>() -> impl Parser<'a, &'a str, char, MyToken> {
+    ///     string("foo").replace(MyToken::Foo)
+    /// }
+    ///
+    /// fn parse_foo<'a>() -> impl Parser<'a, &'a [MyToken], MyToken, Foo> {
+    ///     token(MyToken::Foo).map(|_| Foo)
+    /// }
+    ///
+    /// fn parse_foo_from_str<'a>(input: &'a str) -> ParseResult<'a, &'a str, char, Foo> {
+    ///     let lex = lex_foo().mult1();
+    ///     let (remaining, tokens) = lex.parse(input)?;
+    ///
+    ///     let t_slice = tokens.as_slice();
+    ///     let p = parse_foo();
+    ///
+    ///     // second parser error needs to be converted
+    ///     match p.parse(t_slice) {
+    ///         Ok((_, x)) => Ok((remaining, x)),
+    ///         Err(e) => Err(ParseError::other_parser(
+    ///             "lexer succeed but parser failed",
+    ///             e,
+    ///         )),
+    ///     }
+    /// }
+    ///
+    /// assert_eq!(("", Foo), parse_foo_from_str("foo").unwrap());
+    /// assert!(parse_foo_from_str("bar").is_err());
+    /// ```
+    pub fn other_parser<Toks2, T2>(details: &str, parse_error: ParseError<Toks2, T2>) -> Self
+    where
+        Toks2: Tokens<T2>,
+        T2: Clone + Debug,
+    {
+        Self::construct_generic(
+            ErrorType::OtherParser {
+                rendered_error: parse_error.to_string(),
+            },
+            details,
+            None,
         )
     }
 
@@ -744,6 +814,9 @@ where
             ErrorType::Other { cause } => &format!("An error occurred while parsing: {}", cause),
             ErrorType::Flunk => "Parsing failed because a parser flunked",
             ErrorType::NoParse => "Parsing was unsuccessful",
+            ErrorType::OtherParser { rendered_error } => &format!(
+                "Another parser with a different type failed: {}", rendered_error,
+            ),
             ErrorType::NotEnough { needed, got } => &format!(
                 "Parser needed to parse {} elements, but only parsed {}",
                 needed, got,
@@ -971,7 +1044,7 @@ where
     }
 
     fn preview(&self) -> String {
-        let preview_end: usize = 8;
+        let preview_end: usize = cmp::min(self.len(), 8);
         format!("{:?}", &self[..preview_end])
     }
 }
