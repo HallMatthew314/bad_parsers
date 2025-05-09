@@ -1482,21 +1482,6 @@ where
     {
         between(self, left, right)
     }
-
-    /// Method version of [`then_parse`]
-    fn then_parse<F, Toks2, T2, Q, B>(self, other: Q, f: F) -> impl Parser<'a, Toks, T, B>
-    where
-        Self: Sized + 'a,
-        Toks: 'a,
-        A: 'a,
-        F: Fn(&A) -> Toks2 + 'a,
-        Toks2: Tokens<T2> + 'a,
-        T2: Clone + Debug,
-        Q: Parser<'a, Toks2, T2, B> + 'a,
-        B: 'a,
-    {
-        then_parse(self, other, f)
-    }
 }
 
 /// Allows functions/closures with the appropriate signature to act as parsers.
@@ -3313,84 +3298,6 @@ where
         let (input3, x) = p.parse(input2)?;
         let (input4, _) = right.parse(input3)?;
         Ok((input4, x))
-    }
-}
-
-/// Parse one input type to get another, then parse from the second input.
-///
-/// Not to be confused with [`and_then`].
-///
-/// This parser will first use `p` to parse a value that can be turned into another parser's
-/// input.
-/// If successful, the value will be passed to the given function to create the second input,
-/// which will then be parsed from by `q`.
-/// If `q` succeeds, this parser will return the second parsed value, and the remaining input
-/// from the first parser.
-/// If either `p` or `q` fail, then this parser will fail.
-///
-/// The primary use case of this combinator is to conveniently combine a lexer and a parser
-/// into a single object.
-/// Such a combination can be awkward due to the different input types of the two parsers.
-/// ## Examples
-/// ```
-/// use bad_parsers::{Parser, string, then_parse, token};
-///
-/// #[derive(Debug, Clone, PartialEq, Eq)]
-/// enum MyToken {
-///     Foo,
-/// }
-///
-/// #[derive(Debug, PartialEq)]
-/// struct Foo;
-///
-/// fn lex_foo<'a>() -> impl Parser<'a, &'a str, char, MyToken> {
-///     string("foo").replace(MyToken::Foo)
-/// }
-///
-/// fn p_foo<'a>() -> impl Parser<'a, &'a [MyToken], MyToken, Foo> {
-///     token(MyToken::Foo).map(|_| Foo)
-/// }
-///
-/// fn convert<'a>(v: &'a Vec<MyToken>) -> &'a [MyToken] {
-///     v.as_slice()
-/// }
-///
-/// fn foo<'a>() -> impl Parser<'a, &'a str, char, Foo> {
-///     //lex_foo().mult1().then_parse(p_foo(), convert)
-///     then_parse(
-///         lex_foo().mult1(),
-///         p_foo(),
-///         |v: &'a Vec<MyToken>| v.as_slice(),
-///     )
-/// }
-///
-/// assert_eq!(("", Foo), foo().parse("foo").unwrap());
-/// ```
-pub fn then_parse<'a, Toks, T, A, P, F, Toks2, T2, Q, B>(
-    p: P,
-    q: Q,
-    f: F,
-) -> impl Parser<'a, Toks, T, B>
-where
-    Toks: Tokens<T> + 'a,
-    T: Clone + Debug,
-    Toks2: Tokens<T2> + 'a,
-    T2: Clone + Debug,
-    A: 'a,
-    P: Parser<'a, Toks, T, A> + 'a,
-    Q: Parser<'a, Toks2, T2, B> + 'a,
-    F: Fn(&A) -> Toks2 + 'a,
-{
-    move |input_toks| {
-        let (remaining_toks, a) = p.parse(input_toks)?;
-        let input_toks2 = f(&a);
-        match q.parse(input_toks2) {
-            Ok((_remaining_toks2, b)) => Ok((remaining_toks, b)),
-            Err(e) => Err(ParseError::other_parser(
-                "first step succeeded, second failed",
-                e
-            )),
-        }
     }
 }
 
