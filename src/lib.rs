@@ -3670,7 +3670,7 @@ mod tests {
     }
 
     // In the future, god willing, the map_err can be replaced with just a question mark
-    fn fails_with_other(input: &str) -> ParseResult<&str, char, char> {
+    fn fails_with_other(input: &str) -> ParseResult<'_, &str, char, char> {
         let _dummy = make_io_error().map_err(|e| ParseError::other("details", input, e))?;
         Ok((input, 'a')) // <--- this shouldn't happen
     }
