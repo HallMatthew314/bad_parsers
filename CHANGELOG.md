@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `filter_map`, feeds the parse value into a function `Fn(A) -> Option<B>`, failing if the function returns `None`.
 - `within_and_sep_by` and `within_and_sep_by1`, similar combinators to `sep_by` but they work in the opposite way.
 - `ParseError::other_parser`, allows forwarding error values between parsers with different input types
 

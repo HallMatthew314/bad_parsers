@@ -1474,6 +1474,18 @@ where
     {
         between(self, left, right)
     }
+
+    /// Method version of [`filter_map`]
+    fn filter_map<F, B>(self, f: F) -> impl Parser<'a, Toks, T, B>
+    where
+        Self: Sized + 'a,
+        Toks: 'a,
+        A: 'a,
+        F: Fn(A) -> Option<B> + 'a,
+        B: 'a,
+    {
+        filter_map(self, f)
+    }
 }
 
 /// Allows functions/closures with the appropriate signature to act as parsers.
@@ -3293,6 +3305,47 @@ where
     }
 }
 
+/// Fails the given parser if its return value passed to the given function returns None.
+///
+/// This parser will first try to parse a value with `p`.
+/// If `p` fails, then the parser fails.
+/// If `p` succeeds, its return value is passed to `f`.
+/// If `f` returns `None`, the parser fails.
+/// Otherwise, that value is returned by the parser.
+///
+/// This combinator provides functionality similar to using [`ensure`] and [`map`] in sequence.
+/// It is particularly effective when needing to perform a type conversion that may fail.
+///
+/// See also: [`ensure`], [`map`], [`reject`].
+/// ## Examples
+/// ```
+/// use bad_parsers::{Parser, any_token};
+///
+/// // Parse a single character that can be turned into a digit.
+/// let p = any_token().filter_map(|c: char| c.to_digit(10));
+///
+/// assert_eq!(("<-one", 1), p.parse("1<-one").unwrap());
+/// assert!(p.parse("").is_err());
+/// assert!(p.parse("no digits here").is_err());
+/// ```
+pub fn filter_map<'a, Toks, T, A, P, F, B>(p: P, f: F) -> impl Parser<'a, Toks, T, B>
+where
+    Toks: Tokens<T> + 'a,
+    T: Clone + Debug,
+    A: 'a,
+    P: Parser<'a, Toks, T, A> + 'a,
+    F: Fn(A) -> Option<B> + 'a,
+    B: 'a,
+{
+    move |input| {
+        let (rest, x) = p.parse(input)?;
+        match f(x) {
+            Some(y) => Ok((rest, y)),
+            None => Err(ParseError::no_parse("value rejected by filter_map", input)),
+        }
+    }
+}
+
 /// Parses a single token from the input.
 ///
 /// This parser will only fail when the input is empty.
@@ -4350,6 +4403,26 @@ mod tests {
         token('a').within(token('-')),
         vec![("-a-", ("", 'a')), ("-a-b", ("b", 'a')),],
         vec!["", "a", "-a", "a-", "-b-"],
+    );
+
+    p_test!(
+        test_filter_map,
+        &str,
+        u32,
+        any_token().filter_map(|c: char| c.to_digit(10)),
+        vec![
+            ("0", ("", 0)),
+            ("11", ("1", 1)),
+            ("21", ("1", 2)),
+            ("3_", ("_", 3)),
+            ("4garbage", ("garbage", 4)),
+            ("5555", ("555", 5)),
+            ("60oewcw", ("0oewcw", 6)),
+            ("7", ("", 7)),
+            ("8", ("", 8)),
+            ("9", ("", 9)),
+        ],
+        vec!["", "a", "a1", "_", "iern48735cofj34wf"],
     );
 
     // alternate way to use or() combinator
